@@ -1,0 +1,34 @@
+{
+  "name": "skin-trace",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Hybrid skincare visual progress tracker targeting iPhone 16 Pro (Web UI + native iOS TrueDepth bridge).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "cap:add:ios": "cap add ios",
+    "cap:sync": "npm run build && cap sync ios",
+    "cap:open:ios": "cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0",
+    "@skin-trace/truedepth-camera": "file:./plugins/truedepth-camera",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true
+  }
+}

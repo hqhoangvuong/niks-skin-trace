@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+plugins/*/dist/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Capacitor / iOS generated & build artifacts
+ios/App/App/public/
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/
+.build/
+*.xcarchive
+*.ipa
+*.dSYM.zip
+*.dSYM
+xcuserdata/
+*.xcuserstate
+*.moved-aside
+
+# Local test captures & sensitive facial data (never commit user photos)
+captures/
+local-sessions/
+*.heic
+*.HEIC
+
+# OS & editor junk
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+*.swp
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+*.log

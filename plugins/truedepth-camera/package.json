@@ -1,0 +1,32 @@
+{
+  "name": "@skin-trace/truedepth-camera",
+  "version": "0.1.0",
+  "description": "Local Capacitor iOS AVFoundation TrueDepth paired RGB + depth capture plugin for Skin Trace.",
+  "type": "module",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "files": [
+    "src/",
+    "ios/",
+    "Package.swift",
+    "SkinTraceTrueDepthCamera.podspec"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@capacitor/core": "^7.0.0"
+  },
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  }
+}
