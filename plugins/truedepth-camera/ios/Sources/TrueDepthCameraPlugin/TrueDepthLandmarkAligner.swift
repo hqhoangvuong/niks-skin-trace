@@ -147,19 +147,19 @@ enum TrueDepthLandmarkAligner {
             height: max(fh * 0.16, (eyeY - fy) * 0.65)
         )
 
-        let cheekTop = eyeY + fh * 0.10
-        let cheekHeight = max(fh * 0.16, (mouthY - cheekTop) * 0.85)
+        let cheekTop = eyeY + fh * 0.06
+        let cheekHeight = max(fh * 0.18, (mouthY - cheekTop) * 0.85)
         // In an unmirrored front-camera photo, the viewer's left side corresponds to anatomical right cheek.
         let anatomicalRightCheekRect = CGRect(
-            x: fx + fw * 0.10,
+            x: fx + fw * 0.08,
             y: cheekTop,
-            width: fw * 0.27,
+            width: fw * 0.29,
             height: cheekHeight
         )
         let anatomicalLeftCheekRect = CGRect(
             x: fx + fw * 0.63,
             y: cheekTop,
-            width: fw * 0.27,
+            width: fw * 0.29,
             height: cheekHeight
         )
         let chinRect = CGRect(

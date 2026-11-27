@@ -207,7 +207,9 @@ enum TrueDepthBlemishAnalyzer {
 
             for obs in observations {
                 guard let topLabel = obs.labels.first else { continue }
-                let conf = Double(topLabel.confidence)
+                // For 1-class Core ML NMS models, topLabel.confidence is conditional P(class|obj) == 1.0,
+                // while obs.confidence holds the true detection box score.
+                let conf = Double(min(obs.confidence, topLabel.confidence))
                 guard conf.isFinite && conf >= uncThresh else { continue }
 
                 // Never coerce unmapped/background labels into active acne.
