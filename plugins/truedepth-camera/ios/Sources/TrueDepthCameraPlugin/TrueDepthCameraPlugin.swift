@@ -75,8 +75,8 @@ public class TrueDepthCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         let view = call.getString("view") ?? "front"
         let variant = call.getString("variant") ?? "rgb_depth_guided"
         let requestDepth = call.getBool("requestDepth") ?? (variant == "rgb_depth_guided")
-        let targetMin = call.getDouble("targetMinDistanceMeters") ?? 0.20
-        let targetMax = call.getDouble("targetMaxDistanceMeters") ?? 0.30
+        let targetMin = call.getDouble("targetMinDistanceMeters") ?? 0.22
+        let targetMax = call.getDouble("targetMaxDistanceMeters") ?? 0.34
         let ghostImageUri = call.getString("ghostImageUri")
         let ghostOpacity = call.getDouble("ghostOpacity") ?? 0.28
 

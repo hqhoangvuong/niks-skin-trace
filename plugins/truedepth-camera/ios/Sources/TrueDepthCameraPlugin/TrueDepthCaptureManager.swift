@@ -488,6 +488,9 @@ final class TrueDepthCaptureManager: NSObject {
             record["liveGuidanceAtShutter"] = liveGuidanceAtShutter
         }
 
+        let facialAlignment = TrueDepthLandmarkAligner.extract(from: photoData)
+        record["facialAlignment"] = facialAlignment
+
         let metadataData = try JSONSerialization.data(withJSONObject: record, options: [.prettyPrinted, .sortedKeys])
         let metadataURL = sessionDir.appendingPathComponent("session.json")
         try metadataData.write(to: metadataURL, options: [.atomic, .completeFileProtection])

@@ -37,12 +37,26 @@ export interface AnalysisResult {
   note: string;
 }
 
+export interface ComparisonDeltas {
+  distanceDeltaCm?: number;
+  scaleDeltaPct?: number;
+  yawDeltaDeg?: number;
+  rollDeltaDeg?: number;
+  exposureEvDelta?: number;
+  wbRedDelta?: number;
+  wbBlueDelta?: number;
+}
+
 export interface ComparisonRecord {
   baselineSessionId: string;
   currentSessionId: string;
   view: CaptureView;
   comparabilityState: 'not_comparable' | 'unavailable' | 'comparable';
-  reason: string;
+  alignmentMode: 'eye_landmarks' | 'face_box' | 'unaligned';
+  reasons: string[];
+  cautions: string[];
+  deltas: ComparisonDeltas;
+  analysisStatus: MetricAvailabilityState;
 }
 
 export interface SessionEnvelope {

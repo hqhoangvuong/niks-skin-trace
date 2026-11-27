@@ -97,6 +97,46 @@ export interface CameraExposureMetadata {
   lensPosition?: number;
 }
 
+export interface NormalizedPoint {
+  x: number;
+  y: number;
+}
+
+export interface NormalizedRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface FacialRegionMap {
+  forehead?: NormalizedRect;
+  anatomicalLeftCheek?: NormalizedRect;
+  anatomicalRightCheek?: NormalizedRect;
+  chin?: NormalizedRect;
+}
+
+export interface FacialAlignmentMetadata {
+  detected: boolean;
+  faceCount: number;
+  coordinateOrigin?: 'top_left_normalized';
+  faceBoundingBox?: NormalizedRect;
+  anatomicalLeftEye?: NormalizedPoint;
+  anatomicalRightEye?: NormalizedPoint;
+  eyeCenterMidpoint?: NormalizedPoint;
+  interEyeDistance?: number;
+  eyeLineAngleDegrees?: number;
+  noseTip?: NormalizedPoint;
+  mouthCenter?: NormalizedPoint;
+  poseDegrees?: {
+    yawDegrees?: number;
+    rollDegrees?: number;
+    pitchDegrees?: number;
+  };
+  regions?: FacialRegionMap;
+  error?: string;
+}
+
 /**
  * Pilot-default live guidance snapshot emitted by AVCaptureDataOutputSynchronizer
  * + Vision face landmarks. Thresholds are provisional until calibrated on hardware.
@@ -180,6 +220,7 @@ export interface NativeCaptureRecord {
     pixelFormat: string;
   };
   cameraMetadata?: CameraExposureMetadata;
+  facialAlignment?: FacialAlignmentMetadata;
   depth: DepthStats;
   liveGuidanceAtShutter?: LiveGuidanceSnapshot;
   captureDurationMs: number;

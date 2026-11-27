@@ -38,6 +38,7 @@ skin-trace/
 │           ├── TrueDepthDeviceInspector.swift
 │           ├── TrueDepthCaptureManager.swift
 │           ├── TrueDepthGuidanceEvaluator.swift
+│           ├── TrueDepthLandmarkAligner.swift
 │           └── TrueDepthLiveCameraViewController.swift
 ├── docs/
 │   └── skincare-iphone16pro-handoff.md

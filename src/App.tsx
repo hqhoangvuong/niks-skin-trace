@@ -7,6 +7,7 @@ import type {
   LiveGuidanceSnapshot,
 } from '@skin-trace/truedepth-camera';
 import { cameraBridge, resolvePreviewSrc } from './services/cameraBridge';
+import { BeforeAfterViewer } from './components/BeforeAfterViewer';
 import {
   buildM0SessionEnvelope,
   type SessionEnvelope,
@@ -47,19 +48,25 @@ class AppErrorBoundary extends Component<
   }
 }
 
-type DistancePreset = 'close_20_30' | 'standard_28_42';
+type DistancePreset = 'calibrated_22_34' | 'tight_20_30' | 'wide_28_42';
+type ActiveTab = 'capture' | 'compare';
 
 const DISTANCE_PRESETS: Record<
   DistancePreset,
   { label: string; minMeters: number; maxMeters: number }
 > = {
-  close_20_30: {
-    label: '20–30 cm (TrueDepth precision sweet spot)',
+  calibrated_22_34: {
+    label: '22–34 cm (Calibrated handheld sweet spot)',
+    minMeters: 0.22,
+    maxMeters: 0.34,
+  },
+  tight_20_30: {
+    label: '20–30 cm (Close TrueDepth range)',
     minMeters: 0.2,
     maxMeters: 0.3,
   },
-  standard_28_42: {
-    label: '28–42 cm (Wider fixed-focus framing)',
+  wide_28_42: {
+    label: '28–42 cm (Wider framing)',
     minMeters: 0.28,
     maxMeters: 0.42,
   },
@@ -74,6 +81,7 @@ export function App() {
 }
 
 function CaptureLab() {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('capture');
   const [permission, setPermission] = useState<CameraPermissionState>('prompt');
   const [report, setReport] = useState<DeviceCapabilityReport | null>(null);
   const [sessions, setSessions] = useState<SessionEnvelope[]>([]);
@@ -82,11 +90,12 @@ function CaptureLab() {
   const [view, setView] = useState<CaptureView>('front');
   const [variant, setVariant] = useState<ExperimentVariant>('rgb_depth_guided');
   const [distancePreset, setDistancePreset] =
-    useState<DistancePreset>('close_20_30');
+    useState<DistancePreset>('calibrated_22_34');
   const [useGhostOverlay, setUseGhostOverlay] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
+  const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
 
   const platform = cameraBridge.getPlatform();
   const isNative = cameraBridge.isNativePlatform();
@@ -247,6 +256,17 @@ function CaptureLab() {
     }
   }
 
+  async function handleCopySessionJson(session: SessionEnvelope) {
+    try {
+      await navigator.clipboard.writeText(
+        JSON.stringify(session.capture, null, 2)
+      );
+      setCopiedSessionId(session.capture.sessionId);
+    } catch {
+      setErrorMsg('Clipboard copy unavailable in this environment.');
+    }
+  }
+
   return (
     <main className="app-shell">
       <header className="header">
@@ -277,13 +297,34 @@ function CaptureLab() {
         </p>
       </header>
 
+      <nav className="tab-bar" aria-label="App sections">
+        <button
+          type="button"
+          className={activeTab === 'capture' ? 'primary' : ''}
+          onClick={() => setActiveTab('capture')}
+        >
+          Capture Lab
+        </button>
+        <button
+          type="button"
+          className={activeTab === 'compare' ? 'primary' : ''}
+          onClick={() => setActiveTab('compare')}
+        >
+          Timeline &amp; Compare ({sessions.length})
+        </button>
+      </nav>
+
       {errorMsg && (
         <div className="error-box" role="alert">
           {errorMsg}
         </div>
       )}
 
-      <section className="card">
+      {activeTab === 'compare' ? (
+        <BeforeAfterViewer sessions={sessions} />
+      ) : (
+        <>
+          <section className="card">
         <h2>1. Hardware &amp; TrueDepth Capability Probe</h2>
         <div className="controls">
           <button
@@ -545,13 +586,25 @@ function CaptureLab() {
                         {capture.storedImageMirrored ? 'yes' : 'no'}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      className="danger-btn"
-                      onClick={() => handleDeleteSession(capture.sessionId)}
-                    >
-                      Delete
-                    </button>
+                    <div className="controls" style={{ marginTop: 0 }}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopySessionJson({ capture, quality, analysis })
+                        }
+                      >
+                        {copiedSessionId === capture.sessionId
+                          ? 'Copied JSON'
+                          : 'Copy JSON'}
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-btn"
+                        onClick={() => handleDeleteSession(capture.sessionId)}
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
 
                   <div className="kv-grid">
@@ -671,6 +724,8 @@ function CaptureLab() {
           </div>
         )}
       </section>
+        </>
+      )}
     </main>
   );
 }

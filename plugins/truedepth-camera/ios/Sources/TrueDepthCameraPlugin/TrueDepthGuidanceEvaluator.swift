@@ -78,7 +78,7 @@ struct EvaluatedGuidance {
 /// Evaluates synchronized RGB video + optional AVDepthData frames for live M1 capture quality gating.
 /// All numerical thresholds are marked provisional pending physical-device pilot calibration.
 enum TrueDepthGuidanceEvaluator {
-    private static let provisionalSharpnessMin: Double = 35.0
+    private static let provisionalSharpnessMin: Double = 22.0
     private static let provisionalHighlightClipMax: Double = 0.08
     private static let provisionalShadowClipMax: Double = 0.12
     private static let provisionalMouthOpenMax: Double = 0.16
@@ -116,8 +116,9 @@ enum TrueDepthGuidanceEvaluator {
             )
         }
 
-        let faces = detectFacesWithLandmarks(pixelBuffer: videoPixelBuffer)
-        let faceCount = faces.count
+        let detection = detectFacesWithPoseAndLandmarks(pixelBuffer: videoPixelBuffer)
+        let faces = detection.landmarkFaces.isEmpty ? detection.rectFaces : detection.landmarkFaces
+        let faceCount = max(detection.rectFaces.count, detection.landmarkFaces.count)
         var messages: [String] = []
 
         var faceCentered: Bool?
@@ -135,6 +136,7 @@ enum TrueDepthGuidanceEvaluator {
         } else if faceCount > 1 {
             messages.append("Multiple faces detected. Capture one face at a time.")
         } else if let face = faces.first {
+            let poseFace = detection.rectFaces.first ?? face
             let box = face.boundingBox
             faceRectNormalized = box
             let centerX = box.midX
@@ -147,13 +149,13 @@ enum TrueDepthGuidanceEvaluator {
                 messages.append("Center your face inside the guide oval.")
             }
 
-            if let yaw = face.yaw?.doubleValue {
+            if let yaw = (poseFace.yaw ?? face.yaw)?.doubleValue {
                 yawDeg = yaw * 180.0 / .pi
             }
-            if let roll = face.roll?.doubleValue {
+            if let roll = (poseFace.roll ?? face.roll)?.doubleValue {
                 rollDeg = roll * 180.0 / .pi
             }
-            if #available(iOS 15.0, *), let pitch = face.pitch?.doubleValue {
+            if #available(iOS 15.0, *), let pitch = (poseFace.pitch ?? face.pitch)?.doubleValue {
                 pitchDeg = pitch * 180.0 / .pi
             }
 
@@ -307,14 +309,19 @@ enum TrueDepthGuidanceEvaluator {
         )
     }
 
-    private static func detectFacesWithLandmarks(pixelBuffer: CVPixelBuffer) -> [VNFaceObservation] {
-        let request = VNDetectFaceLandmarksRequest()
+    /// Runs VNDetectFaceRectanglesRequest alongside VNDetectFaceLandmarksRequest so continuous
+    /// yaw/roll/pitch angles are populated reliably while still providing lip landmarks.
+    private static func detectFacesWithPoseAndLandmarks(
+        pixelBuffer: CVPixelBuffer
+    ) -> (rectFaces: [VNFaceObservation], landmarkFaces: [VNFaceObservation]) {
+        let rectRequest = VNDetectFaceRectanglesRequest()
+        let landmarkRequest = VNDetectFaceLandmarksRequest()
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .up, options: [:])
         do {
-            try handler.perform([request])
-            return request.results ?? []
+            try handler.perform([rectRequest, landmarkRequest])
+            return (rectRequest.results ?? [], landmarkRequest.results ?? [])
         } catch {
-            return []
+            return ([], [])
         }
     }
 
