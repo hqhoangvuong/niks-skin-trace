@@ -216,6 +216,45 @@ export interface RunCoreMLBlemishAnalysisOptions {
   uncertainThreshold?: number;
 }
 
+export interface RegionColorimetryMetrics {
+  region: FacialRegionId;
+  state: 'measured' | 'unavailable';
+  unavailableReason?: string;
+  sampledPixelCount: number;
+  validSkinPixelRatio: number;
+  meanLStar: number | null;
+  meanAStar: number | null;
+  /** Diagnostic only; not used as a primary improvement metric due to indoor smartphone blue-channel variance. */
+  meanBStar: number | null;
+  /** Relative optical redness proxy: 100 * log10(R_lin / G_lin). */
+  erythemaIndex: number | null;
+  /** Relative optical darkness proxy: 100 * log10(1 / R_lin) — not physiological melanin concentration. */
+  melaninIndexProxy: number | null;
+  /** Fraction [0, 1] of valid-skin pixels with a* >= median_a* + 3.0. */
+  elevatedRednessAreaFraction: number | null;
+  /** Fraction [0, 1] of valid-skin pixels with L* <= p75_L* - 6.0. */
+  darkSpotContrastAreaFraction: number | null;
+  /** Mean (p75_L* - spot_L*) across dark-spot pixels (0 when area fraction is 0). */
+  darkSpotContrastDeltaL: number | null;
+}
+
+export interface ColorimetryAnalysisRecord {
+  sessionId: string;
+  analyzedAtIso: string;
+  state: 'measured' | 'unavailable';
+  unavailableReason?: string;
+  algorithmVersion: string;
+  metricDefinitionVersion: string;
+  colorSpace: 'sRGB_D65';
+  computationTimeMs: number;
+  regions: RegionColorimetryMetrics[];
+  warnings: string[];
+}
+
+export interface RunColorimetryAnalysisOptions {
+  sessionId: string;
+}
+
 /**
  * Pilot-default live guidance snapshot emitted by AVCaptureDataOutputSynchronizer
  * + Vision face landmarks. Thresholds are provisional until calibrated on hardware.
@@ -301,6 +340,7 @@ export interface NativeCaptureRecord {
   cameraMetadata?: CameraExposureMetadata;
   facialAlignment?: FacialAlignmentMetadata;
   blemishAnalysis?: BlemishAnalysisRecord;
+  colorimetryAnalysis?: ColorimetryAnalysisRecord;
   depth: DepthStats;
   liveGuidanceAtShutter?: LiveGuidanceSnapshot;
   captureDurationMs: number;

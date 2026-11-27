@@ -1,6 +1,7 @@
 import type {
   BlemishAnalysisRecord,
   CaptureView,
+  ColorimetryAnalysisRecord,
   NativeCaptureRecord,
 } from '@skin-trace/truedepth-camera';
 
@@ -79,6 +80,17 @@ export function buildM0SessionEnvelope(
   const blemishState: MetricAvailabilityState = blemish
     ? blemish.state
     : 'not_analyzed';
+  const colorimetry: ColorimetryAnalysisRecord | undefined =
+    capture.colorimetryAnalysis;
+  const colorimetryState: MetricAvailabilityState = colorimetry
+    ? colorimetry.state
+    : 'not_analyzed';
+  const overallAnalysisState: MetricAvailabilityState =
+    blemishState === 'measured' || colorimetryState === 'measured'
+      ? 'measured'
+      : blemishState === 'unavailable' || colorimetryState === 'unavailable'
+        ? 'unavailable'
+        : 'not_analyzed';
 
   return {
     capture,
@@ -101,8 +113,11 @@ export function buildM0SessionEnvelope(
       sessionId: capture.sessionId,
       modelVersion: blemish?.modelVersion ?? null,
       preprocessingVersion: blemish?.preprocessingVersion ?? null,
-      metricDefinitionVersion: blemish?.metricDefinitionVersion ?? null,
-      state: blemishState,
+      metricDefinitionVersion:
+        blemish?.metricDefinitionVersion ??
+        colorimetry?.metricDefinitionVersion ??
+        null,
+      state: overallAnalysisState,
       concerns: [
         {
           concern: 'acne_blemishes',
@@ -115,18 +130,27 @@ export function buildM0SessionEnvelope(
         },
         {
           concern: 'dark_spots',
-          state: 'not_analyzed',
-          reason: 'Staged for Milestone M3.',
+          state: colorimetryState,
+          reason:
+            colorimetry?.unavailableReason ??
+            (colorimetry
+              ? `CIELAB local darkness contrast (${colorimetry.algorithmVersion})`
+              : 'Run Redness & Spots analysis to compute optical spot contrast.'),
         },
         {
           concern: 'redness',
-          state: 'not_analyzed',
-          reason: 'Staged for Milestone M3.',
+          state: colorimetryState,
+          reason:
+            colorimetry?.unavailableReason ??
+            (colorimetry
+              ? `CIELAB a* & Erythema Index proxy (${colorimetry.algorithmVersion})`
+              : 'Run Redness & Spots analysis to compute optical redness.'),
         },
       ],
-      note: blemish
-        ? `Persisted ${blemish.source} record (${blemish.modelVersion ?? 'unversioned'}).`
-        : 'Capture recorded locally; blemish analysis has not been run.',
+      note:
+        blemish || colorimetry
+          ? `Persisted local analysis (${[blemish ? `blemishes:${blemish.state}` : null, colorimetry ? `colorimetry:${colorimetry.state}` : null].filter(Boolean).join(', ')}).`
+          : 'Capture recorded locally; analysis has not been run.',
     },
   };
 }
