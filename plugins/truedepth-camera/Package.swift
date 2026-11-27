@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "SkinTraceTruedepthCamera",
-    platforms: [.iOS(.v14)],
+    platforms: [.iOS(.v18)],
     products: [
         .library(
             name: "SkinTraceTruedepthCamera",

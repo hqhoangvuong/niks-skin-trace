@@ -3,12 +3,12 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
-function findTestFiles(dir, acc = []) {
+function findTestFiles(dir, suffix = '.test.ts', acc = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
-      findTestFiles(full, acc);
-    } else if (entry.name.endsWith('.test.ts')) {
+      findTestFiles(full, suffix, acc);
+    } else if (entry.name.endsWith(suffix)) {
       acc.push(full);
     }
   }
@@ -19,9 +19,10 @@ const outDir = '/tmp/skin-trace-tests';
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 
-const testFiles = findTestFiles('src');
-if (testFiles.length === 0) {
-  console.error('No *.test.ts files found under src/');
+const testFiles = findTestFiles('src', '.test.ts');
+const scriptTestFiles = findTestFiles('scripts', '.test.mjs');
+if (testFiles.length === 0 && scriptTestFiles.length === 0) {
+  console.error('No test files found under src/ or scripts/');
   process.exit(1);
 }
 
@@ -40,4 +41,4 @@ for (const file of testFiles) {
   compiled.push(outFile);
 }
 
-execFileSync(process.execPath, ['--test', ...compiled], { stdio: 'inherit' });
+execFileSync(process.execPath, ['--test', ...compiled, ...scriptTestFiles], { stdio: 'inherit' });

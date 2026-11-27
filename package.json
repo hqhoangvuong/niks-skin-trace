@@ -12,7 +12,8 @@
     "test": "node scripts/run-tests.mjs",
     "cap:add:ios": "cap add ios",
     "cap:sync": "npm run build && cap sync ios",
-    "cap:open:ios": "cap open ios"
+    "cap:open:ios": "cap open ios",
+    "capacitor:update:before": "node scripts/sync-ios-deployment-target.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^7.0.0",
