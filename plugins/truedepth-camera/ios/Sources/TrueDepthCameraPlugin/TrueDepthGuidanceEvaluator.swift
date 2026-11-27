@@ -271,17 +271,14 @@ enum TrueDepthGuidanceEvaluator {
         }
 
         let isUnguided = (config.variant == "rgb_unguided")
-        let ready: Bool
-        if isUnguided {
-            ready = true
-        } else {
-            let basicFaceOK = (faceCount == 1) && (faceCentered == true)
-            let depthOK = !config.requestDepth || (depthAvailable && distanceState == "in_range" && (depthValidRatio ?? 0) >= 0.45)
-            ready = basicFaceOK && depthOK && messages.isEmpty
-        }
+        // Score Variant A objectively on the exact same 2D RGB quality checks as Variant B
+        // (depthOK is true since requestDepth == false). Shutter remains unlocked for unguided selfies.
+        let basicFaceOK = (faceCount == 1) && (faceCentered == true)
+        let depthOK = !config.requestDepth || (depthAvailable && distanceState == "in_range" && (depthValidRatio ?? 0) >= 0.45)
+        let ready = basicFaceOK && depthOK && messages.isEmpty
 
         if ready && messages.isEmpty {
-            messages.append(isUnguided ? "Unguided baseline ready." : "Quality checks passed — tap Capture.")
+            messages.append(isUnguided ? "Unguided baseline quality checks passed." : "Quality checks passed — tap Capture.")
         }
 
         return EvaluatedGuidance(

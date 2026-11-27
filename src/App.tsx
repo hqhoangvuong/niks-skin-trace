@@ -11,6 +11,7 @@ import type {
 import { cameraBridge, resolvePreviewSrc } from './services/cameraBridge';
 import { BeforeAfterViewer } from './components/BeforeAfterViewer';
 import { BlemishInspector } from './components/BlemishInspector';
+import { ValidationLab } from './components/ValidationLab';
 import {
   buildM0SessionEnvelope,
   type SessionEnvelope,
@@ -52,7 +53,7 @@ class AppErrorBoundary extends Component<
 }
 
 type DistancePreset = 'calibrated_22_34' | 'tight_20_30' | 'wide_28_42';
-type ActiveTab = 'capture' | 'compare';
+type ActiveTab = 'capture' | 'compare' | 'validation';
 
 const DISTANCE_PRESETS: Record<
   DistancePreset,
@@ -369,6 +370,13 @@ function CaptureLab() {
         >
           Timeline &amp; Compare ({sessions.length})
         </button>
+        <button
+          type="button"
+          className={activeTab === 'validation' ? 'primary' : ''}
+          onClick={() => setActiveTab('validation')}
+        >
+          Validation Lab (M4)
+        </button>
       </nav>
 
       {errorMsg && (
@@ -379,6 +387,12 @@ function CaptureLab() {
 
       {activeTab === 'compare' ? (
         <BeforeAfterViewer sessions={sessions} />
+      ) : activeTab === 'validation' ? (
+        <ValidationLab
+          sessions={sessions}
+          onAnalysisSaved={handleAnalysisSaved}
+          onColorimetrySaved={handleColorimetrySaved}
+        />
       ) : inspectedSession ? (
         <BlemishInspector
           session={inspectedSession}
@@ -558,7 +572,9 @@ function CaptureLab() {
           </button>
         </div>
 
-        {latestGuidance && (
+        {latestGuidance &&
+          variant !== 'rgb_unguided' &&
+          latestGuidance.variant !== 'rgb_unguided' && (
           <div className="kv-grid">
             <div className="kv-item">
               <div className="kv-label">Last Live Distance</div>

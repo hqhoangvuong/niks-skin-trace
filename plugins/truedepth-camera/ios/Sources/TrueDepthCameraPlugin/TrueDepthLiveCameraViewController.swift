@@ -113,11 +113,13 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         ghostImageView.isHidden = true
         previewContainer.addSubview(ghostImageView)
 
+        let isUnguided = (config.variant == "rgb_unguided")
+
         guideOvalLayer.fillColor = UIColor.clear.cgColor
         guideOvalLayer.strokeColor = UIColor.white.withAlphaComponent(0.75).cgColor
         guideOvalLayer.lineWidth = 2.5
         guideOvalLayer.lineDashPattern = [8, 6]
-        guideOvalLayer.isHidden = (config.variant == "rgb_unguided")
+        guideOvalLayer.isHidden = isUnguided
         previewContainer.layer.addSublayer(guideOvalLayer)
 
         hudCard.translatesAutoresizingMaskIntoConstraints = false
@@ -130,27 +132,36 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         headerLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         headerLabel.textColor = UIColor(white: 0.85, alpha: 1)
-        headerLabel.text = String(
-            format: "View: %@ · %@ · Target %.0f–%.0f cm",
-            config.view,
-            config.variant,
-            config.targetMinMeters * 100.0,
-            config.targetMaxMeters * 100.0
-        )
+        if isUnguided {
+            headerLabel.text = "View: \(config.view) · Variant A (Unguided RGB Baseline)"
+        } else if config.requestDepth {
+            headerLabel.text = String(
+                format: "View: %@ · %@ · Target %.0f–%.0f cm",
+                config.view,
+                config.variant,
+                config.targetMinMeters * 100.0,
+                config.targetMaxMeters * 100.0
+            )
+        } else {
+            headerLabel.text = "View: \(config.view) · Variant B (2D RGB Guided)"
+        }
 
         metricsLabel.translatesAutoresizingMaskIntoConstraints = false
         metricsLabel.font = .monospacedDigitSystemFont(ofSize: 12.5, weight: .medium)
         metricsLabel.textColor = .white
         metricsLabel.numberOfLines = 2
+        metricsLabel.isHidden = isUnguided
         metricsLabel.text = config.requestDepth
             ? "Dist: — · Valid: — · Sharp: — · Neutral: —"
             : "RGB-only · Sharp: — · Faces: 0 · Neutral: —"
 
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         messageLabel.font = .systemFont(ofSize: 14, weight: .semibold)
-        messageLabel.textColor = UIColor.systemYellow
+        messageLabel.textColor = isUnguided ? .white : UIColor.systemYellow
         messageLabel.numberOfLines = 2
-        messageLabel.text = "Initializing camera…"
+        messageLabel.text = isUnguided
+            ? "Baseline selfie mode — frame naturally and tap shutter."
+            : "Initializing camera…"
 
         let hudStack = UIStackView(arrangedSubviews: [headerLabel, metricsLabel, messageLabel])
         hudStack.translatesAutoresizingMaskIntoConstraints = false
@@ -293,7 +304,12 @@ final class TrueDepthLiveCameraViewController: UIViewController {
     @objc private func handleSessionInterruptionEnded() {
         isSessionInterrupted = false
         DispatchQueue.main.async { [weak self] in
-            self?.shutterButton.isEnabled = true
+            guard let self else { return }
+            self.shutterButton.isEnabled = true
+            if self.config.variant == "rgb_unguided" {
+                self.messageLabel.text = "Baseline selfie mode — frame naturally and tap shutter."
+                self.messageLabel.textColor = .white
+            }
         }
     }
 
@@ -501,10 +517,18 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         )
         let dict = evaluated.toDictionary(config: config)
         latestGuidanceDict = dict
-        onGuidanceUpdate(dict)
+        if config.variant != "rgb_unguided" {
+            onGuidanceUpdate(dict)
+        }
 
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.isCapturing else { return }
+            // Variant A (rgb_unguided): keep telemetry recorded silently above,
+            // but suppress all live coaching prompts and readiness colors on screen.
+            if self.config.variant == "rgb_unguided" {
+                return
+            }
+
             let distText = evaluated.faceDistanceMeters.map { String(format: "%.1f cm", $0 * 100.0) } ?? "—"
             let validText = evaluated.depthValidRatio.map { String(format: "%.0f%%", $0 * 100.0) } ?? "—"
             let sharpText = evaluated.sharpnessScore.map { String(format: "%.0f", $0) } ?? "—"
