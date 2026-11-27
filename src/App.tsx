@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Component, type ReactNode, useEffect, useMemo, useState } from 'react';
 import type {
   CameraPermissionState,
   CaptureView,
@@ -11,6 +11,41 @@ import {
   buildM0SessionEnvelope,
   type SessionEnvelope,
 } from './types/domain';
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+class AppErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <main className="app-shell">
+          <div className="error-box" role="alert">
+            <strong>Runtime render error:</strong> {this.state.error.message}
+          </div>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => this.setState({ error: null })}
+          >
+            Retry
+          </button>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 type DistancePreset = 'close_20_30' | 'standard_28_42';
 
@@ -31,6 +66,14 @@ const DISTANCE_PRESETS: Record<
 };
 
 export function App() {
+  return (
+    <AppErrorBoundary>
+      <CaptureLab />
+    </AppErrorBoundary>
+  );
+}
+
+function CaptureLab() {
   const [permission, setPermission] = useState<CameraPermissionState>('prompt');
   const [report, setReport] = useState<DeviceCapabilityReport | null>(null);
   const [sessions, setSessions] = useState<SessionEnvelope[]>([]);
@@ -415,7 +458,7 @@ export function App() {
             <div className="kv-item">
               <div className="kv-label">Last Live Distance</div>
               <div className="kv-value">
-                {latestGuidance.faceDistanceMeters !== null
+                {isFiniteNumber(latestGuidance.faceDistanceMeters)
                   ? `${(latestGuidance.faceDistanceMeters * 100).toFixed(1)} cm (${latestGuidance.distanceState})`
                   : latestGuidance.distanceState}
               </div>
@@ -423,11 +466,11 @@ export function App() {
             <div className="kv-item">
               <div className="kv-label">Sharpness / Expression</div>
               <div className="kv-value">
-                {latestGuidance.sharpnessScore !== null
+                {isFiniteNumber(latestGuidance.sharpnessScore)
                   ? `${latestGuidance.sharpnessScore.toFixed(0)} (${latestGuidance.isSharp ? 'sharp' : 'soft'})`
                   : '—'}{' '}
                 ·{' '}
-                {latestGuidance.neutralExpression === null
+                {typeof latestGuidance.neutralExpression !== 'boolean'
                   ? 'Expr: —'
                   : latestGuidance.neutralExpression
                     ? 'Neutral'
@@ -438,7 +481,7 @@ export function App() {
               <div className="kv-label">Last Face / Pose</div>
               <div className="kv-value">
                 Faces: {latestGuidance.faceCount} · Yaw:{' '}
-                {latestGuidance.yawDegrees !== null
+                {isFiniteNumber(latestGuidance.yawDegrees)
                   ? `${latestGuidance.yawDegrees.toFixed(0)}°`
                   : '—'}
               </div>
@@ -446,7 +489,7 @@ export function App() {
             <div className="kv-item">
               <div className="kv-label">Last Live Prompt</div>
               <div className="kv-value">
-                {latestGuidance.guidanceMessages[0] ?? '—'}
+                {latestGuidance.guidanceMessages?.[0] ?? '—'}
               </div>
             </div>
           </div>
@@ -541,10 +584,10 @@ export function App() {
                     <div className="kv-item">
                       <div className="kv-label">Center Distance / Scale</div>
                       <div className="kv-value">
-                        {capture.depth.centerWindowMedianMeters !== undefined
+                        {isFiniteNumber(capture.depth?.centerWindowMedianMeters)
                           ? `${(capture.depth.centerWindowMedianMeters * 100).toFixed(1)} cm`
                           : '—'}
-                        {capture.depth.estimatedMmPerPixelAtRgb !== undefined
+                        {isFiniteNumber(capture.depth?.estimatedMmPerPixelAtRgb)
                           ? ` · ${capture.depth.estimatedMmPerPixelAtRgb.toFixed(3)} mm/px`
                           : ''}
                       </div>
@@ -552,11 +595,11 @@ export function App() {
                     <div className="kv-item">
                       <div className="kv-label">Valid Depth / Calibration</div>
                       <div className="kv-value">
-                        {capture.depth.validPixelRatio !== undefined
+                        {isFiniteNumber(capture.depth?.validPixelRatio)
                           ? `${(capture.depth.validPixelRatio * 100).toFixed(1)}%`
                           : '—'}{' '}
                         ·{' '}
-                        {capture.depth.calibration?.present
+                        {capture.depth?.calibration?.present
                           ? 'Calibrated'
                           : 'No cal'}
                       </div>
@@ -565,11 +608,22 @@ export function App() {
                       <div className="kv-item">
                         <div className="kv-label">Exposure / White Balance</div>
                         <div className="kv-value">
-                          ISO {Math.round(cam.iso)} ·{' '}
-                          {cam.exposureDurationMs.toFixed(1)} ms · WB{' '}
-                          {cam.whiteBalanceRedGain.toFixed(2)}/
-                          {cam.whiteBalanceGreenGain.toFixed(2)}/
-                          {cam.whiteBalanceBlueGain.toFixed(2)}
+                          ISO {isFiniteNumber(cam.iso) ? Math.round(cam.iso) : '—'} ·{' '}
+                          {isFiniteNumber(cam.exposureDurationMs)
+                            ? `${cam.exposureDurationMs.toFixed(1)} ms`
+                            : '—'}{' '}
+                          · WB{' '}
+                          {isFiniteNumber(cam.whiteBalanceRedGain)
+                            ? cam.whiteBalanceRedGain.toFixed(2)
+                            : '—'}
+                          /
+                          {isFiniteNumber(cam.whiteBalanceGreenGain)
+                            ? cam.whiteBalanceGreenGain.toFixed(2)
+                            : '—'}
+                          /
+                          {isFiniteNumber(cam.whiteBalanceBlueGain)
+                            ? cam.whiteBalanceBlueGain.toFixed(2)
+                            : '—'}
                         </div>
                       </div>
                     )}
@@ -578,17 +632,17 @@ export function App() {
                         <div className="kv-label">Shutter Quality Signals</div>
                         <div className="kv-value">
                           Sharp:{' '}
-                          {shutter.sharpnessScore !== null
+                          {isFiniteNumber(shutter.sharpnessScore)
                             ? shutter.sharpnessScore.toFixed(0)
                             : '—'}{' '}
                           · Expr:{' '}
-                          {shutter.neutralExpression === null
+                          {typeof shutter.neutralExpression !== 'boolean'
                             ? '—'
                             : shutter.neutralExpression
                               ? 'Neutral'
                               : 'Non-neutral'}{' '}
                           · Glare:{' '}
-                          {shutter.clippedHighlightRatio !== null
+                          {isFiniteNumber(shutter.clippedHighlightRatio)
                             ? `${(shutter.clippedHighlightRatio * 100).toFixed(1)}%`
                             : '—'}
                         </div>
