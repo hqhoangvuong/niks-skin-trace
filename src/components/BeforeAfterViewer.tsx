@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import type {
   CaptureView,
+  FacialRegionId,
   FacialRegionMap,
   NativeCaptureRecord,
 } from '@skin-trace/truedepth-camera';
@@ -10,8 +11,17 @@ import {
   compareBlemishAnalyses,
   type TrackedLesionMatch,
 } from '../services/blemishMetrics';
+import { compareColorimetryAnalyses } from '../services/colorimetryMetrics';
 import { evaluateComparability } from '../services/comparison';
 import type { SessionEnvelope } from '../types/domain';
+
+const FRIENDLY_REGION_LABELS: Record<FacialRegionId, string> = {
+  forehead: 'Forehead',
+  anatomicalLeftCheek: 'Left Cheek',
+  anatomicalRightCheek: 'Right Cheek',
+  chin: 'Chin',
+  other: 'Other',
+};
 
 interface BeforeAfterViewerProps {
   sessions: SessionEnvelope[];
@@ -181,6 +191,11 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
   const blemishComparison = useMemo(() => {
     if (!baseline || !current || !comparison) return null;
     return compareBlemishAnalyses(baseline, current, comparison);
+  }, [baseline, current, comparison]);
+
+  const colorimetryComparison = useMemo(() => {
+    if (!baseline || !current || !comparison) return null;
+    return compareColorimetryAnalyses(baseline, current, comparison);
   }, [baseline, current, comparison]);
 
   const timelineGroups = useMemo(() => {
@@ -412,7 +427,7 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                       <tbody>
                         {blemishComparison.regionDeltas.map((row) => (
                           <tr key={row.region}>
-                            <td>{row.region}</td>
+                            <td>{FRIENDLY_REGION_LABELS[row.region]}</td>
                             <td>
                               {row.baselineActiveCount} →{' '}
                               {row.currentActiveCount} (
@@ -438,6 +453,92 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                       Visible count differences reflect annotated/detected
                       regions only and do not establish product causation. A
                       no-longer-detected lesion is not proof of healing.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
+            {colorimetryComparison && (
+              <div
+                className={`gate-box ${
+                  colorimetryComparison.state === 'measured'
+                    ? 'ok'
+                    : colorimetryComparison.state === 'not_comparable'
+                      ? 'danger'
+                      : 'warn'
+                }`}
+              >
+                <div className="badge-row">
+                  <span
+                    className={`badge ${
+                      colorimetryComparison.state === 'measured'
+                        ? 'ok'
+                        : colorimetryComparison.state === 'not_comparable'
+                          ? 'danger'
+                          : 'warn'
+                    }`}
+                  >
+                    Redness &amp; Spots: {colorimetryComparison.state}
+                  </span>
+                </div>
+
+                <ul className="note-list">
+                  {colorimetryComparison.reasons.map((reason, idx) => (
+                    <li key={idx}>{reason}</li>
+                  ))}
+                </ul>
+
+                {colorimetryComparison.state === 'measured' && (
+                  <>
+                    <table className="region-table" style={{ marginTop: 10 }}>
+                      <thead>
+                        <tr>
+                          <th>Region</th>
+                          <th>Redness Δa* / Area</th>
+                          <th>Redness Status</th>
+                          <th>Dark-Spot Area / ΔL*</th>
+                          <th>Spot Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {colorimetryComparison.regionDeltas.map((row) => (
+                          <tr key={row.region}>
+                            <td>{FRIENDLY_REGION_LABELS[row.region]}</td>
+                            {row.state === 'measured' ? (
+                              <>
+                                <td>
+                                  {row.deltaAStar !== null
+                                    ? `${row.deltaAStar >= 0 ? '+' : ''}${row.deltaAStar.toFixed(1)}`
+                                    : '—'}{' '}
+                                  /{' '}
+                                  {row.deltaRednessAreaPctPts !== null
+                                    ? `${row.deltaRednessAreaPctPts >= 0 ? '+' : ''}${row.deltaRednessAreaPctPts.toFixed(1)}pp`
+                                    : '—'}
+                                </td>
+                                <td>{row.rednessStatus.replace(/_/g, ' ')}</td>
+                                <td>
+                                  {row.deltaDarkSpotAreaPctPts !== null
+                                    ? `${row.deltaDarkSpotAreaPctPts >= 0 ? '+' : ''}${row.deltaDarkSpotAreaPctPts.toFixed(1)}pp`
+                                    : '—'}{' '}
+                                  /{' '}
+                                  {row.deltaDarkSpotContrastL !== null
+                                    ? `${row.deltaDarkSpotContrastL >= 0 ? '+' : ''}${row.deltaDarkSpotContrastL.toFixed(1)}`
+                                    : '—'}
+                                </td>
+                                <td>{row.darkSpotStatus.replace(/_/g, ' ')}</td>
+                              </>
+                            ) : (
+                              <td colSpan={4}>Unavailable (low valid skin)</td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="subtitle" style={{ marginTop: 8 }}>
+                      Appearance proxies gated to ≤ 0.75 EV, ≤ 0.20 WB gain, and
+                      ≤ 4.0 cm distance shift. Small shifts inside the noise
+                      floor are reported as no clear change.
                     </p>
                   </>
                 )}

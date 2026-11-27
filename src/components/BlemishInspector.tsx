@@ -2,6 +2,7 @@ import { useMemo, useState, type MouseEvent } from 'react';
 import type {
   BlemishAnalysisRecord,
   CandidateLesion,
+  ColorimetryAnalysisRecord,
   FacialRegionId,
   LesionCategory,
 } from '@skin-trace/truedepth-camera';
@@ -17,6 +18,10 @@ import type { SessionEnvelope } from '../types/domain';
 interface BlemishInspectorProps {
   session: SessionEnvelope;
   onAnalysisSaved: (sessionId: string, analysis: BlemishAnalysisRecord) => void;
+  onColorimetrySaved: (
+    sessionId: string,
+    colorimetry: ColorimetryAnalysisRecord
+  ) => void;
   onClose: () => void;
 }
 
@@ -47,6 +52,7 @@ function createPinId(): string {
 export function BlemishInspector({
   session,
   onAnalysisSaved,
+  onColorimetrySaved,
   onClose,
 }: BlemishInspectorProps) {
   const { capture } = session;
@@ -55,6 +61,9 @@ export function BlemishInspector({
   const [analysis, setAnalysis] = useState<BlemishAnalysisRecord | undefined>(
     existing
   );
+  const [colorimetry, setColorimetry] = useState<
+    ColorimetryAnalysisRecord | undefined
+  >(capture.colorimetryAnalysis);
   const [lesions, setLesions] = useState<CandidateLesion[]>(
     existing?.lesions ?? []
   );
@@ -231,6 +240,34 @@ export function BlemishInspector({
     }
   }
 
+  async function handleRunColorimetry() {
+    setBusy('colorimetry');
+    setStatusMsg(null);
+    try {
+      const result = await cameraBridge.runColorimetryAnalysis(
+        capture.sessionId
+      );
+      if (result.state === 'unavailable') {
+        setStatusMsg(
+          result.unavailableReason ??
+            'Redness & Spots (CIELAB) analysis is unavailable for this session.'
+        );
+        return;
+      }
+      setColorimetry(result);
+      onColorimetrySaved(capture.sessionId, result);
+      setStatusMsg(
+        `Redness & Spots (CIELAB) completed in ${result.computationTimeMs} ms.`
+      );
+    } catch (err) {
+      setStatusMsg(
+        err instanceof Error ? err.message : 'Colorimetry analysis failed.'
+      );
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleCopyAnalysisJson() {
     const payload =
       analysis ?? {
@@ -315,6 +352,15 @@ export function BlemishInspector({
           disabled={busy !== null}
         >
           {busy === 'coreml' ? 'Running Core ML…' : 'Run On-Device Core ML'}
+        </button>
+        <button
+          type="button"
+          onClick={handleRunColorimetry}
+          disabled={busy !== null}
+        >
+          {busy === 'colorimetry'
+            ? 'Analyzing Color…'
+            : 'Run Redness & Spots (CIELAB)'}
         </button>
         <button
           type="button"
@@ -477,7 +523,7 @@ export function BlemishInspector({
       )}
 
       <div style={{ marginTop: 16 }}>
-        <h2>Per-Region Summary</h2>
+        <h2>Per-Region Blemish Summary</h2>
         {analysis?.state !== 'measured' ? (
           <p className="subtitle">
             Not analyzed yet — place pins, tap <strong>Record Verified 0</strong>,
@@ -510,6 +556,75 @@ export function BlemishInspector({
               ))}
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <h2>Redness &amp; Dark-Spot Appearance (CIELAB)</h2>
+        {colorimetry?.state !== 'measured' ? (
+          <p className="subtitle">
+            Not analyzed yet — tap{' '}
+            <strong>Run Redness &amp; Spots (CIELAB)</strong> to compute
+            deterministic sRGB optical proxies per facial ROI.
+          </p>
+        ) : (
+          <>
+            <table className="region-table">
+              <thead>
+                <tr>
+                  <th>Region</th>
+                  <th>Valid Skin</th>
+                  <th>Redness (a* / EI)</th>
+                  <th>Patchy Red</th>
+                  <th>Dark Spots (ΔL*)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(colorimetry.regions ?? []).map((row) => (
+                  <tr key={row.region}>
+                    <td>{REGION_LABELS[row.region]}</td>
+                    <td>{(row.validSkinPixelRatio * 100).toFixed(0)}%</td>
+                    {row.state === 'measured' ? (
+                      <>
+                        <td>
+                          {row.meanAStar !== null
+                            ? row.meanAStar.toFixed(1)
+                            : '—'}{' '}
+                          /{' '}
+                          {row.erythemaIndex !== null
+                            ? row.erythemaIndex.toFixed(1)
+                            : '—'}
+                        </td>
+                        <td>
+                          {row.elevatedRednessAreaFraction !== null
+                            ? `${(row.elevatedRednessAreaFraction * 100).toFixed(1)}%`
+                            : '—'}
+                        </td>
+                        <td>
+                          {row.darkSpotContrastAreaFraction !== null
+                            ? `${(row.darkSpotContrastAreaFraction * 100).toFixed(1)}%`
+                            : '—'}
+                          {row.darkSpotContrastDeltaL !== null &&
+                          row.darkSpotContrastDeltaL > 0
+                            ? ` (${row.darkSpotContrastDeltaL.toFixed(1)} L*)`
+                            : ''}
+                        </td>
+                      </>
+                    ) : (
+                      <td colSpan={3}>
+                        Unavailable ({row.unavailableReason ?? 'low valid skin'})
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="subtitle" style={{ marginTop: 6 }}>
+              Optical appearance proxies computed on sRGB skin pixels (glare &amp;
+              deep shadow excluded) — not physiological melanin concentration or
+              clinical severity.
+            </p>
+          </>
         )}
       </div>
     </section>

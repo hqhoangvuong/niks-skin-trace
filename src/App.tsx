@@ -3,6 +3,7 @@ import type {
   BlemishAnalysisRecord,
   CameraPermissionState,
   CaptureView,
+  ColorimetryAnalysisRecord,
   DeviceCapabilityReport,
   ExperimentVariant,
   LiveGuidanceSnapshot,
@@ -118,6 +119,22 @@ function CaptureLab() {
           ? buildM0SessionEnvelope({
               ...item.capture,
               blemishAnalysis: analysisRecord,
+            })
+          : item
+      )
+    );
+  }
+
+  function handleColorimetrySaved(
+    sessionId: string,
+    colorimetryRecord: ColorimetryAnalysisRecord
+  ) {
+    setSessions((prev) =>
+      prev.map((item) =>
+        item.capture.sessionId === sessionId
+          ? buildM0SessionEnvelope({
+              ...item.capture,
+              colorimetryAnalysis: colorimetryRecord,
             })
           : item
       )
@@ -366,6 +383,7 @@ function CaptureLab() {
         <BlemishInspector
           session={inspectedSession}
           onAnalysisSaved={handleAnalysisSaved}
+          onColorimetrySaved={handleColorimetrySaved}
           onClose={() => setInspectedSessionId(null)}
         />
       ) : (
@@ -624,13 +642,26 @@ function CaptureLab() {
                         </span>
                         <span
                           className={`badge ${
-                            analysis.state === 'measured' ? 'ok' : ''
+                            capture.blemishAnalysis?.state === 'measured'
+                              ? 'ok'
+                              : ''
                           }`}
                         >
-                          Analysis: {analysis.state}
+                          Blemishes:{' '}
+                          {capture.blemishAnalysis?.state ?? 'not_analyzed'}
                           {capture.blemishAnalysis?.state === 'measured'
-                            ? ` (${capture.blemishAnalysis.regions.reduce((sum, r) => sum + r.activeBlemishCount, 0)} active / ${capture.blemishAnalysis.regions.reduce((sum, r) => sum + r.residualMarkCount, 0)} residual)`
+                            ? ` (${(capture.blemishAnalysis.regions ?? []).reduce((sum, r) => sum + r.activeBlemishCount, 0)} active / ${(capture.blemishAnalysis.regions ?? []).reduce((sum, r) => sum + r.residualMarkCount, 0)} residual)`
                             : ''}
+                        </span>
+                        <span
+                          className={`badge ${
+                            capture.colorimetryAnalysis?.state === 'measured'
+                              ? 'ok'
+                              : ''
+                          }`}
+                        >
+                          Colorimetry:{' '}
+                          {capture.colorimetryAnalysis?.state ?? 'not_analyzed'}
                         </span>
                       </div>
                       <p className="subtitle" style={{ marginTop: 6 }}>
