@@ -109,8 +109,14 @@ enum TrueDepthDeviceInspector {
 
             let videoDims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             let videoSubType = fourCCString(CMFormatDescriptionGetMediaSubType(format.formatDescription))
-            let maxPhotoDims = format.supportedMaxPhotoDimensions.map { dim in
-                ["width": Int(dim.width), "height": Int(dim.height)]
+            let maxPhotoDims: [[String: Int]]
+            if #available(iOS 16.0, *) {
+                maxPhotoDims = format.supportedMaxPhotoDimensions.map { dim in
+                    ["width": Int(dim.width), "height": Int(dim.height)]
+                }
+            } else {
+                let dim = format.highResolutionStillImageDimensions
+                maxPhotoDims = [["width": Int(dim.width), "height": Int(dim.height)]]
             }
 
             let depthFormats: [[String: Any]] = format.supportedDepthDataFormats.map { depthFmt in

@@ -59,6 +59,34 @@ final class TrueDepthCaptureManager: NSObject {
         return docs.appendingPathComponent("SkinTraceSessions", isDirectory: true)
     }
 
+    static func supportedPhotoDimensions(for format: AVCaptureDevice.Format) -> [CMVideoDimensions] {
+        if #available(iOS 16.0, *) {
+            return format.supportedMaxPhotoDimensions
+        } else {
+            return [format.highResolutionStillImageDimensions]
+        }
+    }
+
+    static func configurePortraitRotation(on connection: AVCaptureConnection) {
+        if #available(iOS 17.0, *) {
+            if connection.isVideoRotationAngleSupported(90) {
+                connection.videoRotationAngle = 90
+            }
+        } else if connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
+    }
+
+    static func applyMaxPhotoDimensions(_ maxDim: CMVideoDimensions?, to output: AVCapturePhotoOutput) {
+        if #available(iOS 16.0, *) {
+            if let maxDim {
+                output.maxPhotoDimensions = maxDim
+            }
+        } else {
+            output.isHighResolutionCaptureEnabled = true
+        }
+    }
+
     static func selectBestDepthCapableFormat(
         for device: AVCaptureDevice
     ) -> SelectedFormatChoice? {
@@ -66,8 +94,8 @@ final class TrueDepthCaptureManager: NSObject {
         guard !candidates.isEmpty else { return nil }
 
         let ranked = candidates.max { lhs, rhs in
-            let lhsMax = lhs.supportedMaxPhotoDimensions.map { Int($0.width) * Int($0.height) }.max() ?? 0
-            let rhsMax = rhs.supportedMaxPhotoDimensions.map { Int($0.width) * Int($0.height) }.max() ?? 0
+            let lhsMax = supportedPhotoDimensions(for: lhs).map { Int($0.width) * Int($0.height) }.max() ?? 0
+            let rhsMax = supportedPhotoDimensions(for: rhs).map { Int($0.width) * Int($0.height) }.max() ?? 0
             return lhsMax < rhsMax
         }
 
@@ -81,7 +109,7 @@ final class TrueDepthCaptureManager: NSObject {
             return subType == kCVPixelFormatType_DisparityFloat32
         } ?? videoFormat.supportedDepthDataFormats.first
 
-        let maxPhotoDim = videoFormat.supportedMaxPhotoDimensions.max {
+        let maxPhotoDim = supportedPhotoDimensions(for: videoFormat).max {
             (Int($0.width) * Int($0.height)) < (Int($1.width) * Int($1.height))
         }
 
@@ -102,8 +130,12 @@ final class TrueDepthCaptureManager: NSObject {
         } else {
             settings = AVCapturePhotoSettings()
         }
-        if let maxDim = maxPhotoDimensions {
-            settings.maxPhotoDimensions = maxDim
+        if #available(iOS 16.0, *) {
+            if let maxDim = maxPhotoDimensions {
+                settings.maxPhotoDimensions = maxDim
+            }
+        } else {
+            settings.isHighResolutionPhotoEnabled = true
         }
         if output.isDepthDataDeliveryEnabled {
             settings.isDepthDataDeliveryEnabled = true
@@ -197,7 +229,7 @@ final class TrueDepthCaptureManager: NSObject {
                     selectedMaxPhotoDim = bestFormat.maxPhotoDimensions
                 } else {
                     session.sessionPreset = .photo
-                    selectedMaxPhotoDim = device.activeFormat.supportedMaxPhotoDimensions.max(by: {
+                    selectedMaxPhotoDim = Self.supportedPhotoDimensions(for: device.activeFormat).max(by: {
                         (Int($0.width) * Int($0.height)) < (Int($1.width) * Int($1.height))
                     })
                 }
@@ -207,9 +239,7 @@ final class TrueDepthCaptureManager: NSObject {
                     if connection.isVideoMirroringSupported {
                         connection.isVideoMirrored = false
                     }
-                    if connection.isVideoRotationAngleSupported(90) {
-                        connection.videoRotationAngle = 90
-                    }
+                    Self.configurePortraitRotation(on: connection)
                 }
 
                 let activeVideoDims = CMVideoFormatDescriptionGetDimensions(device.activeFormat.formatDescription)
@@ -221,9 +251,7 @@ final class TrueDepthCaptureManager: NSObject {
                     )
                 ]
 
-                if let maxDim = selectedMaxPhotoDim {
-                    output.maxPhotoDimensions = maxDim
-                }
+                Self.applyMaxPhotoDimensions(selectedMaxPhotoDim, to: output)
 
                 let enableDepth = config.requestDepth && output.isDepthDataDeliverySupported
                 output.isDepthDataDeliveryEnabled = enableDepth

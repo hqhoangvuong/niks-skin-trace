@@ -136,13 +136,21 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         hudStack.spacing = 6
         hudCard.addSubview(hudStack)
 
-        var cancelConfig = UIButton.Configuration.filled()
-        cancelConfig.title = "Cancel"
-        cancelConfig.baseForegroundColor = .white
-        cancelConfig.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
-        cancelConfig.cornerStyle = .capsule
-        cancelConfig.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 18, bottom: 10, trailing: 18)
-        cancelButton.configuration = cancelConfig
+        if #available(iOS 15.0, *) {
+            var cancelConfig = UIButton.Configuration.filled()
+            cancelConfig.title = "Cancel"
+            cancelConfig.baseForegroundColor = .white
+            cancelConfig.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
+            cancelConfig.cornerStyle = .capsule
+            cancelConfig.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 18, bottom: 10, trailing: 18)
+            cancelButton.configuration = cancelConfig
+        } else {
+            cancelButton.setTitle("Cancel", for: .normal)
+            cancelButton.setTitleColor(.white, for: .normal)
+            cancelButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+            cancelButton.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+            cancelButton.layer.cornerRadius = 22
+        }
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
         cancelButton.addTarget(self, action: #selector(handleCancelTapped), for: .touchUpInside)
         view.addSubview(cancelButton)
@@ -303,9 +311,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
                         self.depthDataOutput = depthOut
                         if let dConn = depthOut.connection(with: .depthData) {
                             dConn.isEnabled = true
-                            if dConn.isVideoRotationAngleSupported(90) {
-                                dConn.videoRotationAngle = 90
-                            }
+                            TrueDepthCaptureManager.configurePortraitRotation(on: dConn)
                             if dConn.isVideoMirroringSupported {
                                 dConn.isVideoMirrored = false
                             }
@@ -319,7 +325,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
                     }
                 } else {
                     self.session.sessionPreset = .photo
-                    self.selectedMaxPhotoDim = device.activeFormat.supportedMaxPhotoDimensions.max {
+                    self.selectedMaxPhotoDim = TrueDepthCaptureManager.supportedPhotoDimensions(for: device.activeFormat).max {
                         (Int($0.width) * Int($0.height)) < (Int($1.width) * Int($1.height))
                     }
                 }
@@ -329,9 +335,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
                 }
 
                 if let vConn = self.videoDataOutput.connection(with: .video) {
-                    if vConn.isVideoRotationAngleSupported(90) {
-                        vConn.videoRotationAngle = 90
-                    }
+                    TrueDepthCaptureManager.configurePortraitRotation(on: vConn)
                     if vConn.isVideoMirroringSupported {
                         vConn.isVideoMirrored = false
                     }
@@ -339,9 +343,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
 
                 // Keep stored photo unmirrored; preview layer below is mirrored separately for framing.
                 if let pConn = self.photoOutput.connection(with: .video) {
-                    if pConn.isVideoRotationAngleSupported(90) {
-                        pConn.videoRotationAngle = 90
-                    }
+                    TrueDepthCaptureManager.configurePortraitRotation(on: pConn)
                     if pConn.isVideoMirroringSupported {
                         pConn.isVideoMirrored = false
                     }
@@ -356,9 +358,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
                     )
                 ]
 
-                if let maxDim = self.selectedMaxPhotoDim {
-                    self.photoOutput.maxPhotoDimensions = maxDim
-                }
+                TrueDepthCaptureManager.applyMaxPhotoDimensions(self.selectedMaxPhotoDim, to: self.photoOutput)
 
                 let enablePhotoDepth = self.config.requestDepth && self.photoOutput.isDepthDataDeliverySupported
                 self.photoOutput.isDepthDataDeliveryEnabled = enablePhotoDepth
@@ -372,9 +372,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     if let previewConn = self.previewLayer?.connection {
-                        if previewConn.isVideoRotationAngleSupported(90) {
-                            previewConn.videoRotationAngle = 90
-                        }
+                        TrueDepthCaptureManager.configurePortraitRotation(on: previewConn)
                         if previewConn.isVideoMirroringSupported {
                             previewConn.automaticallyAdjustsVideoMirroring = false
                             previewConn.isVideoMirrored = true

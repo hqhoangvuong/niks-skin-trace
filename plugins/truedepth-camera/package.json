@@ -16,7 +16,7 @@
     "src/",
     "ios/",
     "Package.swift",
-    "SkinTraceTrueDepthCamera.podspec"
+    "SkinTraceTruedepthCamera.podspec"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit"

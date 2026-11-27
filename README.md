@@ -12,6 +12,7 @@ Built as a **hybrid app**:
 ## Authoritative Planning Docs
 
 - [Product & Technical Handoff](docs/skincare-iphone16pro-handoff.md)
+- [TrueDepth & RGB Skin Analysis Research](specs/truedepth-skin-analysis-research.md)
 - [Architecture Decisions (ADRs)](specs/architecture-decisions.md)
 - [M0 Device Capability Report Template](specs/m0-device-capability-report.template.md)
 - [Agent & Engineering Rules](AGENTS.md)
@@ -30,7 +31,7 @@ skin-trace/
 ├── plugins/
 │   └── truedepth-camera/               # Local Capacitor plugin (TS contract + web fallback + iOS Swift)
 │       ├── Package.swift               # Swift Package Manager manifest (Capacitor 7)
-│       ├── SkinTraceTrueDepthCamera.podspec
+│       ├── SkinTraceTruedepthCamera.podspec
 │       ├── src/                        # TypeScript definitions & honest web fallback
 │       └── ios/Sources/TrueDepthCameraPlugin/
 │           ├── TrueDepthCameraPlugin.swift
@@ -42,7 +43,8 @@ skin-trace/
 │   └── skincare-iphone16pro-handoff.md
 └── specs/
     ├── architecture-decisions.md
-    └── m0-device-capability-report.template.md
+    ├── m0-device-capability-report.template.md
+    └── truedepth-skin-analysis-research.md
 ```
 
 ## Development Workflow (Author on Linux/WSL -> Build & Sign on Mac)
