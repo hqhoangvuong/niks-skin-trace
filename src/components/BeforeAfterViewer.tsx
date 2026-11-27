@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import type {
   CaptureView,
   FacialRegionMap,
@@ -73,6 +73,54 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
   const [autoAlign, setAutoAlign] = useState(true);
   const [showRois, setShowRois] = useState(true);
   const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    origPanX: number;
+    origPanY: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (zoom <= 1) {
+      setPan({ x: 0, y: 0 });
+    }
+  }, [zoom]);
+
+  function handleStagePointerDown(e: PointerEvent<HTMLDivElement>) {
+    if (zoom <= 1) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      origPanX: pan.x,
+      origPanY: pan.y,
+    };
+  }
+
+  function handleStagePointerMove(e: PointerEvent<HTMLDivElement>) {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const maxShift = ((zoom - 1) / (2 * zoom)) * 100;
+    const dxPct = ((e.clientX - drag.startX) / rect.width) * (100 / zoom);
+    const dyPct = ((e.clientY - drag.startY) / rect.height) * (100 / zoom);
+    setPan({
+      x: Math.min(maxShift, Math.max(-maxShift, drag.origPanX + dxPct)),
+      y: Math.min(maxShift, Math.max(-maxShift, drag.origPanY + dyPct)),
+    });
+  }
+
+  function handleStagePointerUp(e: PointerEvent<HTMLDivElement>) {
+    if (dragRef.current?.pointerId === e.pointerId) {
+      dragRef.current = null;
+    }
+  }
+
+  const zoomTransform = `scale(${zoom}) translate(${pan.x.toFixed(2)}%, ${pan.y.toFixed(2)}%)`;
 
   const viewSessions = useMemo(
     () => sessions.filter((s) => s.capture.view === selectedView),
@@ -332,10 +380,16 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
             {baseSrc && currSrc ? (
               viewerMode === 'slider' ? (
                 <div className="compare-stage-wrap">
-                  <div className="compare-stage">
+                  <div
+                    className={`compare-stage ${zoom > 1 ? 'pannable' : ''}`}
+                    onPointerDown={handleStagePointerDown}
+                    onPointerMove={handleStagePointerMove}
+                    onPointerUp={handleStagePointerUp}
+                    onPointerCancel={handleStagePointerUp}
+                  >
                     <div
                       className="compare-zoom-layer"
-                      style={{ transform: `scale(${zoom})` }}
+                      style={{ transform: zoomTransform }}
                     >
                       <img
                         className="compare-img"
@@ -346,9 +400,14 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                           transformOrigin: currentOrigin,
                         }}
                       />
+                    </div>
+                    <div
+                      className="compare-clip-left"
+                      style={{ clipPath: `inset(0 ${100 - splitPct}% 0 0)` }}
+                    >
                       <div
-                        className="compare-clip-left"
-                        style={{ clipPath: `inset(0 ${100 - splitPct}% 0 0)` }}
+                        className="compare-zoom-layer"
+                        style={{ transform: zoomTransform }}
                       >
                         <img
                           className="compare-img"
@@ -356,12 +415,20 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                           alt="Baseline before capture"
                         />
                       </div>
-                      {showRois && (
+                    </div>
+                    {showRois && (
+                      <div
+                        className="compare-zoom-layer"
+                        style={{
+                          transform: zoomTransform,
+                          pointerEvents: 'none',
+                        }}
+                      >
                         <div className="roi-overlay">
                           {renderRegionBoxes(baseline?.facialAlignment?.regions)}
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    )}
                     <div
                       className="split-divider"
                       style={{ left: `${splitPct}%` }}
@@ -381,10 +448,16 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                 </div>
               ) : (
                 <div className="side-by-side-grid">
-                  <div className="compare-stage">
+                  <div
+                    className={`compare-stage ${zoom > 1 ? 'pannable' : ''}`}
+                    onPointerDown={handleStagePointerDown}
+                    onPointerMove={handleStagePointerMove}
+                    onPointerUp={handleStagePointerUp}
+                    onPointerCancel={handleStagePointerUp}
+                  >
                     <div
                       className="compare-zoom-layer"
-                      style={{ transform: `scale(${zoom})` }}
+                      style={{ transform: zoomTransform }}
                     >
                       <img
                         className="compare-img"
@@ -399,10 +472,16 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                     </div>
                     <span className="stage-tag left">Before</span>
                   </div>
-                  <div className="compare-stage">
+                  <div
+                    className={`compare-stage ${zoom > 1 ? 'pannable' : ''}`}
+                    onPointerDown={handleStagePointerDown}
+                    onPointerMove={handleStagePointerMove}
+                    onPointerUp={handleStagePointerUp}
+                    onPointerCancel={handleStagePointerUp}
+                  >
                     <div
                       className="compare-zoom-layer"
-                      style={{ transform: `scale(${zoom})` }}
+                      style={{ transform: zoomTransform }}
                     >
                       <img
                         className="compare-img"

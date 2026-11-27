@@ -322,6 +322,15 @@ pre.json-box {
   border: 1px solid var(--border);
 }
 
+.compare-stage.pannable {
+  touch-action: none;
+  cursor: grab;
+}
+
+.compare-stage.pannable:active {
+  cursor: grabbing;
+}
+
 .compare-zoom-layer {
   position: absolute;
   inset: 0;
