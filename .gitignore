@@ -49,3 +49,12 @@ pnpm-debug.log*
 
 # Plan execution scratch
 .superpowers/
+
+# Local ML model weights & export outputs (never commit binary weights)
+.venv-ml/
+ml-export/
+*.mlpackage/
+*.mlmodel
+*.mlmodelc/
+*.pt
+*.onnx

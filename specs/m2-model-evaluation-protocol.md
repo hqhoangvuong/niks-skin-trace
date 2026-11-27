@@ -48,9 +48,26 @@ A candidate model starts as `modelSource: "research_coreml_model"` and `licenseS
 
 ---
 
-## 4. Bundling a Candidate Core ML Model in Xcode
+## 4. Personal Research Quickstart: Export & Bundle a Core ML Model on Mac
 
-`TrueDepthBlemishAnalyzer.swift` automatically activates when both files are added to the `App` target's **Copy Bundle Resources** in Xcode:
+For **personal / non-commercial R&D**, run [scripts/export-coreml-blemish-model.py](../scripts/export-coreml-blemish-model.py) on your Mac to download `mufasabrownie/glowlytics-skin-models` (`acne_detector_best.pt`, YOLOv8s 640×640), inspect its class labels, and export both files required by `TrueDepthBlemishAnalyzer.swift`:
+
+```bash
+python3 -m venv .venv-ml
+source .venv-ml/bin/activate
+pip install --upgrade pip ultralytics coremltools huggingface_hub
+python3 scripts/export-coreml-blemish-model.py
+```
+
+Then in Xcode (`npx cap open ios`):
+1. Drag **`ml-export/BlemishDetector.mlpackage`** and **`ml-export/blemish_model_manifest.json`** into the `App/App` group.
+2. Check **Copy items if needed** and **Add to targets: App** (confirm both appear under `App` → **Build Phases → Copy Bundle Resources**).
+3. Clean (`Cmd + Shift + K`) and Run (`Cmd + R`) on your iPhone.
+4. Open any session → **Inspect / Annotate** → **Run On-Device Core ML**.
+
+## 5. Manual Bundling Reference (Any Custom Model)
+
+`TrueDepthBlemishAnalyzer.swift` automatically activates when both files are present in **Copy Bundle Resources**:
 
 1. **`BlemishDetector.mlpackage`** (Xcode compiles it to `BlemishDetector.mlmodelc` in the app bundle) — object detector outputting `VNRecognizedObjectObservation` (export with `nms=True` or Core ML NMS pipeline).
 2. **`blemish_model_manifest.json`** declaring explicit provenance, class mapping, and thresholds:

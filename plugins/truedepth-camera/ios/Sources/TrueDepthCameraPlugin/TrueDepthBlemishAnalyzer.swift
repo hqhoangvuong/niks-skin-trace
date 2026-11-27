@@ -160,12 +160,19 @@ enum TrueDepthBlemishAnalyzer {
         var failedRoiReasons: [String] = []
 
         for job in cropJobs {
-            let pixelRect = CGRect(
+            let rawPixelRect = CGRect(
                 x: (job.rect.minX * imgWidth).rounded(.down),
                 y: (job.rect.minY * imgHeight).rounded(.down),
                 width: max(1, (job.rect.width * imgWidth).rounded(.up)),
                 height: max(1, (job.rect.height * imgHeight).rounded(.up))
-            ).intersection(CGRect(x: 0, y: 0, width: imgWidth, height: imgHeight))
+            )
+            // Expand to a 1:1 square pixel window centered on the ROI so Vision scaleFill
+            // preserves lesion aspect ratio without letterbox coordinate drift.
+            let side = min(max(rawPixelRect.width, rawPixelRect.height), min(imgWidth, imgHeight))
+            let sqX = max(0, min(imgWidth - side, rawPixelRect.midX - side / 2.0)).rounded(.down)
+            let sqY = max(0, min(imgHeight - side, rawPixelRect.midY - side / 2.0)).rounded(.down)
+            let pixelRect = CGRect(x: sqX, y: sqY, width: side.rounded(.down), height: side.rounded(.down))
+                .intersection(CGRect(x: 0, y: 0, width: imgWidth, height: imgHeight))
 
             guard pixelRect.width >= 16, pixelRect.height >= 16,
                   let cropped = fullCGImage.cropping(to: pixelRect) else {
@@ -174,7 +181,7 @@ enum TrueDepthBlemishAnalyzer {
             }
 
             let request = VNCoreMLRequest(model: vnModel)
-            request.imageCropAndScaleOption = .scaleFit
+            request.imageCropAndScaleOption = .scaleFill
             let handler = VNImageRequestHandler(cgImage: cropped, orientation: .up, options: [:])
             do {
                 try handler.perform([request])
