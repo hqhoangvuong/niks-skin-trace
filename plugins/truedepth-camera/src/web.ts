@@ -72,7 +72,7 @@ export class TrueDepthCameraWeb
       depthCapableFormats: [],
       notes: [
         'Running in web browser fallback. Standard browser APIs do not expose iPhone TrueDepth camera data.',
-        'Build and run the Capacitor iOS app on a physical iPhone 16 Pro to execute the M0 TrueDepth capability experiment.',
+        'Build and run the Capacitor iOS app on a physical iPhone to execute native TrueDepth captures.',
       ],
     };
   }
@@ -161,6 +161,13 @@ export class TrueDepthCameraWeb
       rollDegrees: null,
       pitchDegrees: null,
       meanLuma: null,
+      clippedHighlightRatio: null,
+      clippedShadowRatio: null,
+      sharpnessScore: null,
+      isSharp: null,
+      neutralExpression: null,
+      mouthOpenRatio: null,
+      mouthWidthRatio: null,
       depthAvailable: false,
       faceDistanceMeters: null,
       depthValidRatio: null,
@@ -168,7 +175,7 @@ export class TrueDepthCameraWeb
       sessionInterrupted: false,
       readyToCapture: true,
       guidanceMessages: [
-        'Web fallback preview: TrueDepth distance & native Vision face pose are unavailable in browser.',
+        'Web fallback preview: TrueDepth distance, sharpness, and native Vision landmarks are unavailable in browser.',
       ],
     };
     this.notifyListeners('guidanceUpdate', snapshot);
@@ -195,6 +202,16 @@ export class TrueDepthCameraWeb
         'width:100%;height:100%;object-fit:cover;transform:scaleX(-1);';
       videoWrap.appendChild(video);
 
+      let ghostImg: HTMLImageElement | null = null;
+      if (options.ghostImageUri && options.variant !== 'rgb_unguided') {
+        ghostImg = document.createElement('img');
+        ghostImg.src = options.ghostImageUri;
+        ghostImg.alt = 'Previous session alignment overlay';
+        const opacity = Math.min(0.6, Math.max(0.05, options.ghostOpacity ?? 0.28));
+        ghostImg.style.cssText = `position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:${opacity};pointer-events:none;`;
+        videoWrap.appendChild(ghostImg);
+      }
+
       if (options.variant !== 'rgb_unguided') {
         const oval = document.createElement('div');
         oval.style.cssText =
@@ -203,7 +220,7 @@ export class TrueDepthCameraWeb
       }
 
       const controls = document.createElement('div');
-      controls.style.cssText = 'display:flex;gap:16px;align-items:center;';
+      controls.style.cssText = 'display:flex;gap:12px;align-items:center;';
 
       const cancelBtn = document.createElement('button');
       cancelBtn.textContent = 'Cancel';
@@ -216,6 +233,23 @@ export class TrueDepthCameraWeb
         'padding:12px 22px;border-radius:999px;border:none;background:#4fa3ff;color:#071422;font-weight:700;cursor:pointer;';
 
       controls.append(cancelBtn, captureBtn);
+
+      if (ghostImg) {
+        const ghostBtn = document.createElement('button');
+        let ghostVisible = true;
+        ghostBtn.textContent = 'Ghost: On';
+        ghostBtn.style.cssText =
+          'padding:10px 14px;border-radius:999px;border:1px solid #555;background:#222;color:#fff;font-weight:600;cursor:pointer;';
+        ghostBtn.onclick = () => {
+          ghostVisible = !ghostVisible;
+          if (ghostImg) {
+            ghostImg.style.display = ghostVisible ? 'block' : 'none';
+          }
+          ghostBtn.textContent = ghostVisible ? 'Ghost: On' : 'Ghost: Off';
+        };
+        controls.append(ghostBtn);
+      }
+
       overlay.append(banner, videoWrap, controls);
       document.body.appendChild(overlay);
       void video.play();
@@ -240,7 +274,6 @@ export class TrueDepthCameraWeb
         const ctx = canvas.getContext('2d');
         let rgbDataUrl: string | undefined;
         if (ctx) {
-          // Draw unmirrored sensor frame to preserve consistent left/right coordinates.
           ctx.drawImage(video, 0, 0, width, height);
           rgbDataUrl = canvas.toDataURL('image/jpeg', 0.92);
         }

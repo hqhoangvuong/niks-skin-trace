@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type {
   CameraPermissionState,
   CaptureView,
@@ -12,6 +12,24 @@ import {
   type SessionEnvelope,
 } from './types/domain';
 
+type DistancePreset = 'close_20_30' | 'standard_28_42';
+
+const DISTANCE_PRESETS: Record<
+  DistancePreset,
+  { label: string; minMeters: number; maxMeters: number }
+> = {
+  close_20_30: {
+    label: '20–30 cm (TrueDepth precision sweet spot)',
+    minMeters: 0.2,
+    maxMeters: 0.3,
+  },
+  standard_28_42: {
+    label: '28–42 cm (Wider fixed-focus framing)',
+    minMeters: 0.28,
+    maxMeters: 0.42,
+  },
+};
+
 export function App() {
   const [permission, setPermission] = useState<CameraPermissionState>('prompt');
   const [report, setReport] = useState<DeviceCapabilityReport | null>(null);
@@ -20,12 +38,22 @@ export function App() {
     useState<LiveGuidanceSnapshot | null>(null);
   const [view, setView] = useState<CaptureView>('front');
   const [variant, setVariant] = useState<ExperimentVariant>('rgb_depth_guided');
+  const [distancePreset, setDistancePreset] =
+    useState<DistancePreset>('close_20_30');
+  const [useGhostOverlay, setUseGhostOverlay] = useState(true);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
 
   const platform = cameraBridge.getPlatform();
   const isNative = cameraBridge.isNativePlatform();
+
+  const latestMatchingGhostUri = useMemo(() => {
+    const match = sessions.find(
+      (s) => s.capture.view === view && Boolean(s.capture.rgbFileUri)
+    );
+    return match?.capture.rgbFileUri;
+  }, [sessions, view]);
 
   useEffect(() => {
     void refreshInitialState();
@@ -105,12 +133,18 @@ export function App() {
     setErrorMsg(null);
     try {
       const requestDepth = variant === 'rgb_depth_guided';
+      const preset = DISTANCE_PRESETS[distancePreset];
       const res = await cameraBridge.openGuidedCapture({
         view,
         variant,
         requestDepth,
-        targetMinDistanceMeters: 0.28,
-        targetMaxDistanceMeters: 0.42,
+        targetMinDistanceMeters: preset.minMeters,
+        targetMaxDistanceMeters: preset.maxMeters,
+        ghostImageUri:
+          useGhostOverlay && variant !== 'rgb_unguided'
+            ? latestMatchingGhostUri
+            : undefined,
+        ghostOpacity: 0.28,
       });
       if (!res.cancelled && res.record) {
         setSessions((prev) => [buildM0SessionEnvelope(res.record!), ...prev]);
@@ -174,7 +208,7 @@ export function App() {
     <main className="app-shell">
       <header className="header">
         <div className="header-row">
-          <h1>Skin Trace — M0 Capture Lab</h1>
+          <h1>Skin Trace — Capture Lab (M0/M1)</h1>
           <div className="badge-row">
             <span className={`badge ${isNative ? 'ok' : 'warn'}`}>
               Runtime: {platform}
@@ -190,13 +224,13 @@ export function App() {
             >
               Camera: {permission}
             </span>
-            <span className="badge">AI Analysis: not_analyzed (M0)</span>
+            <span className="badge">AI Analysis: not_analyzed</span>
           </div>
         </div>
         <p className="subtitle">
-          Physical iPhone 16 Pro AVFoundation RGB + TrueDepth feasibility probe
-          and live synchronized guidance lab. Original captures remain local
-          on-device; no detections or progress scores are fabricated.
+          AVFoundation paired 12 MP RGB + TrueDepth capture with live quality
+          gating (distance, blur, exposure, neutral expression) and ghost
+          alignment overlay. Original captures remain local on-device.
         </p>
       </header>
 
@@ -323,7 +357,36 @@ export function App() {
               </option>
             </select>
           </label>
+          <label>
+            Target Stand-Off Range
+            <select
+              value={distancePreset}
+              onChange={(e) =>
+                setDistancePreset(e.target.value as DistancePreset)
+              }
+            >
+              {Object.entries(DISTANCE_PRESETS).map(([key, item]) => (
+                <option key={key} value={key}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={useGhostOverlay}
+            disabled={!latestMatchingGhostUri || variant === 'rgb_unguided'}
+            onChange={(e) => setUseGhostOverlay(e.target.checked)}
+          />
+          <span>
+            Show previous <strong>{view}</strong> photo as translucent alignment
+            ghost
+            {!latestMatchingGhostUri ? ' (capture one first)' : ''}
+          </span>
+        </label>
 
         <div className="controls">
           <button
@@ -358,6 +421,20 @@ export function App() {
               </div>
             </div>
             <div className="kv-item">
+              <div className="kv-label">Sharpness / Expression</div>
+              <div className="kv-value">
+                {latestGuidance.sharpnessScore !== null
+                  ? `${latestGuidance.sharpnessScore.toFixed(0)} (${latestGuidance.isSharp ? 'sharp' : 'soft'})`
+                  : '—'}{' '}
+                ·{' '}
+                {latestGuidance.neutralExpression === null
+                  ? 'Expr: —'
+                  : latestGuidance.neutralExpression
+                    ? 'Neutral'
+                    : 'Non-neutral'}
+              </div>
+            </div>
+            <div className="kv-item">
               <div className="kv-label">Last Face / Pose</div>
               <div className="kv-value">
                 Faces: {latestGuidance.faceCount} · Yaw:{' '}
@@ -387,6 +464,7 @@ export function App() {
             {sessions.map(({ capture, quality, analysis }) => {
               const previewSrc = resolvePreviewSrc(capture.rgbFileUri);
               const shutter = capture.liveGuidanceAtShutter;
+              const cam = capture.cameraMetadata;
               return (
                 <article key={capture.sessionId} className="session-item">
                   <div className="session-top">
@@ -439,6 +517,9 @@ export function App() {
                       <div className="kv-value">
                         {capture.rgbDimensions.width} ×{' '}
                         {capture.rgbDimensions.height}
+                        {capture.selectedVideoFormat
+                          ? ` (stream ${capture.selectedVideoFormat.width}×${capture.selectedVideoFormat.height} ${capture.selectedVideoFormat.pixelFormat})`
+                          : ''}
                       </div>
                     </div>
                     <div className="kv-item">
@@ -458,40 +539,57 @@ export function App() {
                       </div>
                     </div>
                     <div className="kv-item">
-                      <div className="kv-label">Center Distance (Median)</div>
+                      <div className="kv-label">Center Distance / Scale</div>
                       <div className="kv-value">
                         {capture.depth.centerWindowMedianMeters !== undefined
-                          ? `${capture.depth.centerWindowMedianMeters.toFixed(3)} m`
+                          ? `${(capture.depth.centerWindowMedianMeters * 100).toFixed(1)} cm`
                           : '—'}
+                        {capture.depth.estimatedMmPerPixelAtRgb !== undefined
+                          ? ` · ${capture.depth.estimatedMmPerPixelAtRgb.toFixed(3)} mm/px`
+                          : ''}
                       </div>
                     </div>
                     <div className="kv-item">
-                      <div className="kv-label">Valid Depth Coverage</div>
+                      <div className="kv-label">Valid Depth / Calibration</div>
                       <div className="kv-value">
                         {capture.depth.validPixelRatio !== undefined
                           ? `${(capture.depth.validPixelRatio * 100).toFixed(1)}%`
-                          : '—'}
-                      </div>
-                    </div>
-                    <div className="kv-item">
-                      <div className="kv-label">Calibration Data</div>
-                      <div className="kv-value">
+                          : '—'}{' '}
+                        ·{' '}
                         {capture.depth.calibration?.present
-                          ? 'Present'
-                          : 'Not present'}
+                          ? 'Calibrated'
+                          : 'No cal'}
                       </div>
                     </div>
+                    {cam && (
+                      <div className="kv-item">
+                        <div className="kv-label">Exposure / White Balance</div>
+                        <div className="kv-value">
+                          ISO {Math.round(cam.iso)} ·{' '}
+                          {cam.exposureDurationMs.toFixed(1)} ms · WB{' '}
+                          {cam.whiteBalanceRedGain.toFixed(2)}/
+                          {cam.whiteBalanceGreenGain.toFixed(2)}/
+                          {cam.whiteBalanceBlueGain.toFixed(2)}
+                        </div>
+                      </div>
+                    )}
                     {shutter && (
                       <div className="kv-item">
-                        <div className="kv-label">Shutter Guidance</div>
+                        <div className="kv-label">Shutter Quality Signals</div>
                         <div className="kv-value">
-                          Faces: {shutter.faceCount} · Dist:{' '}
-                          {shutter.faceDistanceMeters !== null
-                            ? `${(shutter.faceDistanceMeters * 100).toFixed(1)} cm`
+                          Sharp:{' '}
+                          {shutter.sharpnessScore !== null
+                            ? shutter.sharpnessScore.toFixed(0)
                             : '—'}{' '}
-                          · Yaw:{' '}
-                          {shutter.yawDegrees !== null
-                            ? `${shutter.yawDegrees.toFixed(0)}°`
+                          · Expr:{' '}
+                          {shutter.neutralExpression === null
+                            ? '—'
+                            : shutter.neutralExpression
+                              ? 'Neutral'
+                              : 'Non-neutral'}{' '}
+                          · Glare:{' '}
+                          {shutter.clippedHighlightRatio !== null
+                            ? `${(shutter.clippedHighlightRatio * 100).toFixed(1)}%`
                             : '—'}
                         </div>
                       </div>

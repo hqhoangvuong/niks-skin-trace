@@ -45,6 +45,7 @@ enum TrueDepthCaptureError: LocalizedError {
 final class TrueDepthCaptureManager: NSObject {
     private let sessionQueue = DispatchQueue(label: "com.hikarimoon.skintrace.camera.session")
     private var activeSession: AVCaptureSession?
+    private var activeDevice: AVCaptureDevice?
     private var photoOutput: AVCapturePhotoOutput?
     private var pendingCompletion: ((Result<[String: Any], Error>) -> Void)?
     private var pendingConfig: CaptureRequestConfig?
@@ -53,6 +54,7 @@ final class TrueDepthCaptureManager: NSObject {
     private var pendingDeviceType: String = "unknown"
     private var pendingSelectedVideoFormat: [String: Any]?
     private var pendingSelectedDepthFormat: [String: Any]?
+    private var pendingCameraMetadata: [String: Any]?
 
     static var sessionsRootURL: URL {
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -87,27 +89,85 @@ final class TrueDepthCaptureManager: NSObject {
         }
     }
 
+    static func captureCameraMetadata(from device: AVCaptureDevice) -> [String: Any] {
+        let gains = device.deviceWhiteBalanceGains
+        let exposureSeconds = CMTimeGetSeconds(device.exposureDuration)
+        let exposureMs = exposureSeconds.isFinite ? exposureSeconds * 1000.0 : 0.0
+        var meta: [String: Any] = [
+            "iso": Double(device.iso),
+            "exposureDurationMs": exposureMs,
+            "exposureTargetBias": Double(device.exposureTargetBias),
+            "whiteBalanceRedGain": Double(gains.redGain),
+            "whiteBalanceGreenGain": Double(gains.greenGain),
+            "whiteBalanceBlueGain": Double(gains.blueGain)
+        ]
+        if device.isFocusModeSupported(.autoFocus) || device.isFocusModeSupported(.continuousAutoFocus) {
+            meta["lensPosition"] = Double(device.lensPosition)
+        }
+        return meta
+    }
+
+    /// Selects the highest still-photo depth-capable format while preferring a crisp live preview
+    /// resolution (up to 1920x1440 full-range 420f) and the largest float32 depth map (e.g. 640x480).
     static func selectBestDepthCapableFormat(
         for device: AVCaptureDevice
     ) -> SelectedFormatChoice? {
         let candidates = device.formats.filter { !$0.supportedDepthDataFormats.isEmpty }
         guard !candidates.isEmpty else { return nil }
 
+        let idealPreviewCap = 1920 * 1440
+
+        func formatScore(_ fmt: AVCaptureDevice.Format) -> (Int, Int, Int, Int) {
+            let maxPhotoPixels = supportedPhotoDimensions(for: fmt)
+                .map { Int($0.width) * Int($0.height) }
+                .max() ?? 0
+            let vDims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+            let vPixels = Int(vDims.width) * Int(vDims.height)
+            // Prefer streaming resolutions <= 1920x1440 (highest within cap) to balance preview clarity & thermals.
+            let withinCap = (vPixels <= idealPreviewCap) ? 1 : 0
+            let previewRank = withinCap == 1 ? vPixels : -vPixels
+            let subType = CMFormatDescriptionGetMediaSubType(fmt.formatDescription)
+            let pixelFormatRank: Int
+            if subType == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange {
+                pixelFormatRank = 2
+            } else if subType == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange {
+                pixelFormatRank = 1
+            } else {
+                pixelFormatRank = 0
+            }
+            return (maxPhotoPixels, withinCap, previewRank, pixelFormatRank)
+        }
+
         let ranked = candidates.max { lhs, rhs in
-            let lhsMax = supportedPhotoDimensions(for: lhs).map { Int($0.width) * Int($0.height) }.max() ?? 0
-            let rhsMax = supportedPhotoDimensions(for: rhs).map { Int($0.width) * Int($0.height) }.max() ?? 0
-            return lhsMax < rhsMax
+            formatScore(lhs) < formatScore(rhs)
         }
 
         guard let videoFormat = ranked else { return nil }
 
-        let preferredDepthFormat = videoFormat.supportedDepthDataFormats.first { fmt in
+        func depthFormatScore(_ fmt: AVCaptureDevice.Format) -> (Int, Int, Double) {
             let subType = CMFormatDescriptionGetMediaSubType(fmt.formatDescription)
-            return subType == kCVPixelFormatType_DepthFloat32
-        } ?? videoFormat.supportedDepthDataFormats.first { fmt in
-            let subType = CMFormatDescriptionGetMediaSubType(fmt.formatDescription)
-            return subType == kCVPixelFormatType_DisparityFloat32
-        } ?? videoFormat.supportedDepthDataFormats.first
+            let typePriority: Int
+            switch subType {
+            case kCVPixelFormatType_DepthFloat32:
+                typePriority = 4
+            case kCVPixelFormatType_DisparityFloat32:
+                typePriority = 3
+            case kCVPixelFormatType_DepthFloat16:
+                typePriority = 2
+            case kCVPixelFormatType_DisparityFloat16:
+                typePriority = 1
+            default:
+                typePriority = 0
+            }
+            let dDims = CMVideoFormatDescriptionGetDimensions(fmt.formatDescription)
+            let dPixels = Int(dDims.width) * Int(dDims.height)
+            let maxFps = fmt.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+            return (typePriority, dPixels, maxFps)
+        }
+
+        let preferredDepthFormat = videoFormat.supportedDepthDataFormats.max { lhs, rhs in
+            depthFormatScore(lhs) < depthFormatScore(rhs)
+        }
 
         let maxPhotoDim = supportedPhotoDimensions(for: videoFormat).max {
             (Int($0.width) * Int($0.height)) < (Int($1.width) * Int($1.height))
@@ -170,6 +230,7 @@ final class TrueDepthCaptureManager: NSObject {
             self.pendingWarnings = []
             self.pendingSelectedVideoFormat = nil
             self.pendingSelectedDepthFormat = nil
+            self.pendingCameraMetadata = nil
 
             let session = AVCaptureSession()
             session.beginConfiguration()
@@ -191,6 +252,7 @@ final class TrueDepthCaptureManager: NSObject {
                 return
             }
 
+            self.activeDevice = device
             self.pendingDeviceType = device.deviceType.rawValue
             if config.requestDepth && trueDepthDevice == nil {
                 self.pendingWarnings.append("TrueDepth camera unavailable; captured using fallback front camera.")
@@ -266,9 +328,12 @@ final class TrueDepthCaptureManager: NSObject {
 
                 session.startRunning()
 
-                // Allow brief AE/AF settle on a cold single-shot M0 session before triggering shutter.
+                // Allow brief AE/AF settle on a cold single-shot session before triggering shutter.
                 self.sessionQueue.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                     guard let self, let output = self.photoOutput else { return }
+                    if let dev = self.activeDevice {
+                        self.pendingCameraMetadata = Self.captureCameraMetadata(from: dev)
+                    }
                     let settings = Self.makePhotoSettings(for: output, maxPhotoDimensions: selectedMaxPhotoDim)
                     output.capturePhoto(with: settings, delegate: self)
                 }
@@ -320,9 +385,11 @@ final class TrueDepthCaptureManager: NSObject {
     private func tearDownSession() {
         activeSession?.stopRunning()
         activeSession = nil
+        activeDevice = nil
         photoOutput = nil
         pendingConfig = nil
         pendingWarnings = []
+        pendingCameraMetadata = nil
     }
 
     static func persistCapture(
@@ -334,6 +401,7 @@ final class TrueDepthCaptureManager: NSObject {
         deviceType: String,
         selectedVideoFormat: [String: Any]?,
         selectedDepthFormat: [String: Any]?,
+        cameraMetadata: [String: Any]?,
         liveGuidanceAtShutter: [String: Any]?
     ) throws -> [String: Any] {
         var warnings = initialWarnings
@@ -349,8 +417,8 @@ final class TrueDepthCaptureManager: NSObject {
         let rgbURL = sessionDir.appendingPathComponent("original.\(fileExt)")
         try photoData.write(to: rgbURL, options: [.atomic, .completeFileProtection])
 
-        let rgbWidth = photo.resolvedSettings.photoDimensions.width
-        let rgbHeight = photo.resolvedSettings.photoDimensions.height
+        let rgbWidth = Int(photo.resolvedSettings.photoDimensions.width)
+        let rgbHeight = Int(photo.resolvedSettings.photoDimensions.height)
 
         var depthFileUri: String?
         var depthPayload: [String: Any]
@@ -359,6 +427,7 @@ final class TrueDepthCaptureManager: NSObject {
         if let rawDepth = photo.depthData {
             let depthSummary = try extractAndPersistDepth(
                 depthData: rawDepth,
+                rgbLongEdgePx: max(rgbWidth, rgbHeight),
                 sessionDir: sessionDir,
                 warnings: &warnings
             )
@@ -394,8 +463,8 @@ final class TrueDepthCaptureManager: NSObject {
             "effectiveCaptureMode": effectiveMode,
             "storedImageMirrored": false,
             "rgbDimensions": [
-                "width": Int(rgbWidth),
-                "height": Int(rgbHeight)
+                "width": rgbWidth,
+                "height": rgbHeight
             ],
             "rgbFileUri": rgbURL.absoluteString,
             "depth": depthPayload,
@@ -412,6 +481,9 @@ final class TrueDepthCaptureManager: NSObject {
         if let selectedDepthFormat {
             record["selectedDepthFormat"] = selectedDepthFormat
         }
+        if let cameraMetadata {
+            record["cameraMetadata"] = cameraMetadata
+        }
         if let liveGuidanceAtShutter {
             record["liveGuidanceAtShutter"] = liveGuidanceAtShutter
         }
@@ -425,6 +497,7 @@ final class TrueDepthCaptureManager: NSObject {
 
     private static func extractAndPersistDepth(
         depthData: AVDepthData,
+        rgbLongEdgePx: Int,
         sessionDir: URL,
         warnings: inout [String]
     ) throws -> (stats: [String: Any], fileUri: String?) {
@@ -492,6 +565,7 @@ final class TrueDepthCaptureManager: NSObject {
         }
 
         var calibrationDict: [String: Any] = ["present": false]
+        var estimatedMmPerPixelAtRgb: Double?
         if let cal = depthData.cameraCalibrationData {
             let m = cal.intrinsicMatrix
             let matrixArray: [Float] = [
@@ -499,6 +573,14 @@ final class TrueDepthCaptureManager: NSObject {
                 m.columns.0.y, m.columns.1.y, m.columns.2.y,
                 m.columns.0.z, m.columns.1.z, m.columns.2.z
             ]
+            let refLongEdge = max(Double(cal.intrinsicMatrixReferenceDimensions.width), Double(cal.intrinsicMatrixReferenceDimensions.height))
+            let fx = Double(m.columns.0.x)
+            if !centerValues.isEmpty && fx > 0 && refLongEdge > 0 && rgbLongEdgePx > 0 {
+                let medianMeters = Double(centerValues[centerValues.count / 2])
+                let fxAtRgb = fx * (Double(rgbLongEdgePx) / refLongEdge)
+                estimatedMmPerPixelAtRgb = (medianMeters * 1000.0) / fxAtRgb
+            }
+
             calibrationDict = [
                 "present": true,
                 "intrinsicMatrix": matrixArray,
@@ -528,6 +610,10 @@ final class TrueDepthCaptureManager: NSObject {
             "calibration": calibrationDict
         ]
 
+        if let mmPerPx = estimatedMmPerPixelAtRgb {
+            stats["estimatedMmPerPixelAtRgb"] = mmPerPx
+        }
+
         if let minV = centerValues.first, let maxV = centerValues.last {
             let medianV = centerValues[centerValues.count / 2]
             stats["centerWindowMinMeters"] = Double(minV)
@@ -556,6 +642,7 @@ extension TrueDepthCaptureManager: AVCapturePhotoCaptureDelegate {
             let deviceType = self.pendingDeviceType
             let selectedVideoFormat = self.pendingSelectedVideoFormat
             let selectedDepthFormat = self.pendingSelectedDepthFormat
+            let cameraMetadata = self.pendingCameraMetadata
 
             self.pendingCompletion = nil
             self.tearDownSession()
@@ -583,6 +670,7 @@ extension TrueDepthCaptureManager: AVCapturePhotoCaptureDelegate {
                     deviceType: deviceType,
                     selectedVideoFormat: selectedVideoFormat,
                     selectedDepthFormat: selectedDepthFormat,
+                    cameraMetadata: cameraMetadata,
                     liveGuidanceAtShutter: nil
                 )
                 completion(.success(record))

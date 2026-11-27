@@ -83,12 +83,23 @@ export interface DepthStats {
   centerWindowMinMeters?: number;
   centerWindowMedianMeters?: number;
   centerWindowMaxMeters?: number;
+  estimatedMmPerPixelAtRgb?: number;
   calibration?: CalibrationSummary;
+}
+
+export interface CameraExposureMetadata {
+  iso: number;
+  exposureDurationMs: number;
+  exposureTargetBias: number;
+  whiteBalanceRedGain: number;
+  whiteBalanceGreenGain: number;
+  whiteBalanceBlueGain: number;
+  lensPosition?: number;
 }
 
 /**
  * Pilot-default live guidance snapshot emitted by AVCaptureDataOutputSynchronizer
- * + Vision face detection. Thresholds are provisional until calibrated on hardware.
+ * + Vision face landmarks. Thresholds are provisional until calibrated on hardware.
  */
 export interface LiveGuidanceSnapshot {
   timestampIso: string;
@@ -102,6 +113,13 @@ export interface LiveGuidanceSnapshot {
   rollDegrees: number | null;
   pitchDegrees: number | null;
   meanLuma: number | null;
+  clippedHighlightRatio: number | null;
+  clippedShadowRatio: number | null;
+  sharpnessScore: number | null;
+  isSharp: boolean | null;
+  neutralExpression: boolean | null;
+  mouthOpenRatio: number | null;
+  mouthWidthRatio: number | null;
   depthAvailable: boolean;
   faceDistanceMeters: number | null;
   depthValidRatio: number | null;
@@ -121,9 +139,13 @@ export interface OpenGuidedCaptureOptions {
   view: CaptureView;
   variant: ExperimentVariant;
   requestDepth: boolean;
-  /** Provisional target distance range in meters (defaults: 0.28m–0.42m). */
+  /** Provisional target distance range in meters (defaults: 0.20m–0.30m). */
   targetMinDistanceMeters?: number;
   targetMaxDistanceMeters?: number;
+  /** Optional local file URI of a previous photo for the same view to show as a translucent alignment overlay. */
+  ghostImageUri?: string;
+  /** Opacity for the ghost alignment overlay (0.05–0.6, default 0.28). */
+  ghostOpacity?: number;
 }
 
 export interface OpenGuidedCaptureResult {
@@ -157,6 +179,7 @@ export interface NativeCaptureRecord {
     height: number;
     pixelFormat: string;
   };
+  cameraMetadata?: CameraExposureMetadata;
   depth: DepthStats;
   liveGuidanceAtShutter?: LiveGuidanceSnapshot;
   captureDurationMs: number;

@@ -20,6 +20,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
     private let dataOutputQueue = DispatchQueue(label: "com.hikarimoon.skintrace.live.data")
 
     private let session = AVCaptureSession()
+    private var activeDevice: AVCaptureDevice?
     private var previewLayer: AVCaptureVideoPreviewLayer?
     private let photoOutput = AVCapturePhotoOutput()
     private let videoDataOutput = AVCaptureVideoDataOutput()
@@ -30,16 +31,19 @@ final class TrueDepthLiveCameraViewController: UIViewController {
     private var activeDeviceType: String = "unknown"
     private var selectedVideoFormatDict: [String: Any]?
     private var selectedDepthFormatDict: [String: Any]?
+    private var shutterCameraMetadata: [String: Any]?
     private var setupWarnings: [String] = []
     private var isCapturing = false
     private var isSessionInterrupted = false
     private var captureShutterStart: CFAbsoluteTime = 0
     private var lastEvaluationTime: CFAbsoluteTime = 0
     private var latestGuidanceDict: [String: Any]?
+    private var ghostEnabled = true
     private var finished = false
 
     // UI elements
     private let previewContainer = UIView()
+    private let ghostImageView = UIImageView()
     private let guideOvalLayer = CAShapeLayer()
     private let hudCard = UIView()
     private let headerLabel = UILabel()
@@ -47,6 +51,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
     private let messageLabel = UILabel()
     private let cancelButton = UIButton(type: .system)
     private let shutterButton = UIButton(type: .system)
+    private let ghostToggleButton = UIButton(type: .system)
 
     init(
         config: LiveGuidanceConfig,
@@ -68,6 +73,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         buildUI()
+        loadGhostImageIfConfigured()
         registerNotifications()
         configureAndStartSession()
     }
@@ -94,8 +100,18 @@ final class TrueDepthLiveCameraViewController: UIViewController {
 
         let preview = AVCaptureVideoPreviewLayer(session: session)
         preview.videoGravity = .resizeAspectFill
-        previewContainer.layer.addSublayer(preview)
+        previewContainer.layer.insertSublayer(preview, at: 0)
         self.previewLayer = preview
+
+        // Mirror the unmirrored stored reference photo horizontally to match live selfie preview framing.
+        ghostImageView.translatesAutoresizingMaskIntoConstraints = false
+        ghostImageView.contentMode = .scaleAspectFill
+        ghostImageView.clipsToBounds = true
+        ghostImageView.isUserInteractionEnabled = false
+        ghostImageView.transform = CGAffineTransform(scaleX: -1, y: 1)
+        ghostImageView.alpha = CGFloat(min(0.6, max(0.05, config.ghostOpacity)))
+        ghostImageView.isHidden = true
+        previewContainer.addSubview(ghostImageView)
 
         guideOvalLayer.fillColor = UIColor.clear.cgColor
         guideOvalLayer.strokeColor = UIColor.white.withAlphaComponent(0.75).cgColor
@@ -105,7 +121,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         previewContainer.layer.addSublayer(guideOvalLayer)
 
         hudCard.translatesAutoresizingMaskIntoConstraints = false
-        hudCard.backgroundColor = UIColor.black.withAlphaComponent(0.68)
+        hudCard.backgroundColor = UIColor.black.withAlphaComponent(0.72)
         hudCard.layer.cornerRadius = 14
         hudCard.layer.borderWidth = 1
         hudCard.layer.borderColor = UIColor.white.withAlphaComponent(0.18).cgColor
@@ -114,15 +130,21 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         headerLabel.translatesAutoresizingMaskIntoConstraints = false
         headerLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         headerLabel.textColor = UIColor(white: 0.85, alpha: 1)
-        headerLabel.text = "View: \(config.view) · Mode: \(config.variant)"
+        headerLabel.text = String(
+            format: "View: %@ · %@ · Target %.0f–%.0f cm",
+            config.view,
+            config.variant,
+            config.targetMinMeters * 100.0,
+            config.targetMaxMeters * 100.0
+        )
 
         metricsLabel.translatesAutoresizingMaskIntoConstraints = false
-        metricsLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        metricsLabel.font = .monospacedDigitSystemFont(ofSize: 12.5, weight: .medium)
         metricsLabel.textColor = .white
         metricsLabel.numberOfLines = 2
         metricsLabel.text = config.requestDepth
-            ? "Distance: — · Depth Valid: — · Faces: 0"
-            : "RGB-only mode (TrueDepth disabled) · Faces: 0"
+            ? "Dist: — · Valid: — · Sharp: — · Neutral: —"
+            : "RGB-only · Sharp: — · Faces: 0 · Neutral: —"
 
         messageLabel.translatesAutoresizingMaskIntoConstraints = false
         messageLabel.font = .systemFont(ofSize: 14, weight: .semibold)
@@ -136,22 +158,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         hudStack.spacing = 6
         hudCard.addSubview(hudStack)
 
-        if #available(iOS 15.0, *) {
-            var cancelConfig = UIButton.Configuration.filled()
-            cancelConfig.title = "Cancel"
-            cancelConfig.baseForegroundColor = .white
-            cancelConfig.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
-            cancelConfig.cornerStyle = .capsule
-            cancelConfig.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 18, bottom: 10, trailing: 18)
-            cancelButton.configuration = cancelConfig
-        } else {
-            cancelButton.setTitle("Cancel", for: .normal)
-            cancelButton.setTitleColor(.white, for: .normal)
-            cancelButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
-            cancelButton.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-            cancelButton.layer.cornerRadius = 22
-        }
-        cancelButton.translatesAutoresizingMaskIntoConstraints = false
+        configureCapsuleButton(cancelButton, title: "Cancel")
         cancelButton.addTarget(self, action: #selector(handleCancelTapped), for: .touchUpInside)
         view.addSubview(cancelButton)
 
@@ -164,11 +171,21 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         shutterButton.addTarget(self, action: #selector(handleCaptureTapped), for: .touchUpInside)
         view.addSubview(shutterButton)
 
+        configureCapsuleButton(ghostToggleButton, title: "Ghost: On")
+        ghostToggleButton.isHidden = true
+        ghostToggleButton.addTarget(self, action: #selector(handleToggleGhost), for: .touchUpInside)
+        view.addSubview(ghostToggleButton)
+
         NSLayoutConstraint.activate([
             previewContainer.topAnchor.constraint(equalTo: view.topAnchor),
             previewContainer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             previewContainer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             previewContainer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            ghostImageView.topAnchor.constraint(equalTo: previewContainer.topAnchor),
+            ghostImageView.leadingAnchor.constraint(equalTo: previewContainer.leadingAnchor),
+            ghostImageView.trailingAnchor.constraint(equalTo: previewContainer.trailingAnchor),
+            ghostImageView.bottomAnchor.constraint(equalTo: previewContainer.bottomAnchor),
 
             hudCard.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
             hudCard.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
@@ -185,8 +202,55 @@ final class TrueDepthLiveCameraViewController: UIViewController {
             shutterButton.heightAnchor.constraint(equalToConstant: 72),
 
             cancelButton.centerYAnchor.constraint(equalTo: shutterButton.centerYAnchor),
-            cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20)
+            cancelButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+
+            ghostToggleButton.centerYAnchor.constraint(equalTo: shutterButton.centerYAnchor),
+            ghostToggleButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20)
         ])
+    }
+
+    private func configureCapsuleButton(_ button: UIButton, title: String) {
+        if #available(iOS 15.0, *) {
+            var cfg = UIButton.Configuration.filled()
+            cfg.title = title
+            cfg.baseForegroundColor = .white
+            cfg.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
+            cfg.cornerStyle = .capsule
+            cfg.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 16, bottom: 10, trailing: 16)
+            button.configuration = cfg
+        } else {
+            button.setTitle(title, for: .normal)
+            button.setTitleColor(.white, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 15, weight: .semibold)
+            button.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+            button.layer.cornerRadius = 20
+        }
+        button.translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    private func loadGhostImageIfConfigured() {
+        guard config.variant != "rgb_unguided",
+              let uriStr = config.ghostImageUri,
+              let url = URL(string: uriStr),
+              url.isFileURL else {
+            return
+        }
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let image = UIImage(contentsOfFile: url.path) else { return }
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.ghostImageView.image = image
+                self.ghostImageView.isHidden = !self.ghostEnabled
+                self.ghostToggleButton.isHidden = false
+            }
+        }
+    }
+
+    @objc private func handleToggleGhost() {
+        ghostEnabled.toggle()
+        ghostImageView.isHidden = !ghostEnabled
+        configureCapsuleButton(ghostToggleButton, title: ghostEnabled ? "Ghost: On" : "Ghost: Off")
     }
 
     private func updateGuideOvalPath() {
@@ -257,6 +321,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
                 return
             }
 
+            self.activeDevice = device
             self.activeDeviceType = device.deviceType.rawValue
             if self.config.requestDepth && trueDepthDevice == nil {
                 self.setupWarnings.append("TrueDepth camera unavailable; live session running on fallback front camera.")
@@ -405,6 +470,9 @@ final class TrueDepthLiveCameraViewController: UIViewController {
             guard let self, !self.isCapturing else { return }
             self.isCapturing = true
             self.captureShutterStart = CFAbsoluteTimeGetCurrent()
+            if let dev = self.activeDevice {
+                self.shutterCameraMetadata = TrueDepthCaptureManager.captureCameraMetadata(from: dev)
+            }
 
             DispatchQueue.main.async { [weak self] in
                 self?.shutterButton.isEnabled = false
@@ -422,7 +490,7 @@ final class TrueDepthLiveCameraViewController: UIViewController {
 
     private func processLiveFrame(videoBuffer: CVPixelBuffer, depthData: AVDepthData?) {
         let now = CFAbsoluteTimeGetCurrent()
-        guard (now - lastEvaluationTime) >= 0.10 else { return }
+        guard (now - lastEvaluationTime) >= 0.12 else { return }
         lastEvaluationTime = now
 
         let evaluated = TrueDepthGuidanceEvaluator.evaluate(
@@ -437,25 +505,21 @@ final class TrueDepthLiveCameraViewController: UIViewController {
 
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.isCapturing else { return }
-            let distText: String
-            if let d = evaluated.faceDistanceMeters {
-                distText = String(format: "%.1f cm", d * 100.0)
-            } else {
-                distText = "—"
-            }
-            let validText: String
-            if let r = evaluated.depthValidRatio {
-                validText = String(format: "%.0f%%", r * 100.0)
-            } else {
-                validText = "—"
-            }
+            let distText = evaluated.faceDistanceMeters.map { String(format: "%.1f cm", $0 * 100.0) } ?? "—"
+            let validText = evaluated.depthValidRatio.map { String(format: "%.0f%%", $0 * 100.0) } ?? "—"
+            let sharpText = evaluated.sharpnessScore.map { String(format: "%.0f", $0) } ?? "—"
             let yawText = evaluated.yawDegrees.map { String(format: "%.0f°", $0) } ?? "—"
-            let rollText = evaluated.rollDegrees.map { String(format: "%.0f°", $0) } ?? "—"
+            let neutralText: String
+            if let neutral = evaluated.neutralExpression {
+                neutralText = neutral ? "OK" : "Relax"
+            } else {
+                neutralText = "—"
+            }
 
             if self.config.requestDepth {
-                self.metricsLabel.text = "Dist: \(distText) · Valid: \(validText) · Faces: \(evaluated.faceCount) · Yaw: \(yawText) Roll: \(rollText)"
+                self.metricsLabel.text = "Dist: \(distText) (\(validText)) · Sharp: \(sharpText) · Yaw: \(yawText) · Expr: \(neutralText)"
             } else {
-                self.metricsLabel.text = "RGB-only · Faces: \(evaluated.faceCount) · Yaw: \(yawText) Roll: \(rollText)"
+                self.metricsLabel.text = "RGB-only · Faces: \(evaluated.faceCount) · Sharp: \(sharpText) · Yaw: \(yawText) · Expr: \(neutralText)"
             }
 
             self.messageLabel.text = evaluated.guidanceMessages.first ?? ""
@@ -545,6 +609,7 @@ extension TrueDepthLiveCameraViewController: AVCapturePhotoCaptureDelegate {
                     deviceType: self.activeDeviceType,
                     selectedVideoFormat: self.selectedVideoFormatDict,
                     selectedDepthFormat: self.selectedDepthFormatDict,
+                    cameraMetadata: self.shutterCameraMetadata,
                     liveGuidanceAtShutter: self.latestGuidanceDict
                 )
                 self.finishWithOutcome(.captured(record))
