@@ -6,7 +6,7 @@ import type {
 import type { ComparisonRecord, MetricAvailabilityState } from '../types/domain';
 import { STANDARD_FACIAL_REGIONS } from './blemishMetrics';
 
-export const COLORIMETRY_ALGORITHM_VERSION = 'cielab-roi-srgb-v1';
+export const COLORIMETRY_ALGORITHM_VERSION = 'cielab-roi-srgb-v2';
 export const COLORIMETRY_METRIC_VERSION = 'colorimetry-metrics-v1';
 
 // Stricter color-consistency bounds than M1 geometric comparability.
@@ -19,9 +19,9 @@ const MIN_VALID_SKIN_RATIO = 0.35;
 const REDNESS_ASTAR_MARGIN = 3.0;
 const DARK_SPOT_LSTAR_MARGIN = 6.0;
 
-// Provisional noise-floor cutoffs to avoid over-interpreting capture jitter.
+// Calibrated noise-floor cutoffs (tuned from real iPhone repeat-capture jitter).
 const NOISE_ASTAR_DELTA = 0.8;
-const NOISE_AREA_FRACTION_DELTA = 0.015;
+const NOISE_AREA_FRACTION_DELTA = 0.03;
 
 export type AppearanceChangeDirection =
   | 'no_clear_change'
@@ -92,9 +92,72 @@ function percentileSorted(sorted: number[], p: number): number {
   return sorted[idx];
 }
 
+function fitLinearPlane(
+  xs: number[],
+  ys: number[],
+  vals: number[]
+): [number, number, number] | null {
+  const n = vals.length;
+  if (n < 16) return null;
+
+  let sx = 0;
+  let sy = 0;
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  let sv = 0;
+  let sxv = 0;
+  let syv = 0;
+
+  for (let i = 0; i < n; i++) {
+    const x = xs[i];
+    const y = ys[i];
+    const v = vals[i];
+    sx += x;
+    sy += y;
+    sxx += x * x;
+    sxy += x * y;
+    syy += y * y;
+    sv += v;
+    sxv += x * v;
+    syv += y * v;
+  }
+
+  // Symmetric 3x3 normal equations: A * [c0, c1, c2]^T = [sv, sxv, syv]^T
+  const a00 = n;
+  const a01 = sx;
+  const a02 = sy;
+  const a11 = sxx;
+  const a12 = sxy;
+  const a22 = syy;
+
+  const det =
+    a00 * (a11 * a22 - a12 * a12) -
+    a01 * (a01 * a22 - a12 * a02) +
+    a02 * (a01 * a12 - a11 * a02);
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-9) return null;
+
+  const det0 =
+    sv * (a11 * a22 - a12 * a12) -
+    a01 * (sxv * a22 - a12 * syv) +
+    a02 * (sxv * a12 - a11 * syv);
+  const det1 =
+    a00 * (sxv * a22 - a12 * syv) -
+    sv * (a01 * a22 - a12 * a02) +
+    a02 * (a01 * syv - sxv * a02);
+  const det2 =
+    a00 * (a11 * syv - sxv * a12) -
+    a01 * (a01 * syv - sxv * a02) +
+    sv * (a01 * a12 - a11 * a02);
+
+  return [det0 / det, det1 / det, det2 / det];
+}
+
 export function computeRegionColorimetryFromRgba(
   rgba: Uint8ClampedArray,
-  region: FacialRegionId
+  region: FacialRegionId,
+  width?: number,
+  height?: number
 ): RegionColorimetryMetrics {
   const sampledPixelCount = Math.floor(rgba.length / 4);
   if (sampledPixelCount === 0) {
@@ -115,8 +178,17 @@ export function computeRegionColorimetryFromRgba(
     };
   }
 
+  const use2DPlane =
+    typeof width === 'number' &&
+    typeof height === 'number' &&
+    width >= 4 &&
+    height >= 4 &&
+    width * height === sampledPixelCount;
+
   const lValues: number[] = [];
   const aValues: number[] = [];
+  const xCoords: number[] = [];
+  const yCoords: number[] = [];
   let sumL = 0;
   let sumA = 0;
   let sumB = 0;
@@ -138,6 +210,12 @@ export function computeRegionColorimetryFromRgba(
 
     lValues.push(lab.l);
     aValues.push(lab.a);
+    if (use2DPlane) {
+      const px = i % width!;
+      const py = Math.floor(i / width!);
+      xCoords.push(px / (width! - 1) - 0.5);
+      yCoords.push(py / (height! - 1) - 0.5);
+    }
     sumL += lab.l;
     sumA += lab.a;
     sumB += lab.b;
@@ -169,8 +247,21 @@ export function computeRegionColorimetryFromRgba(
     };
   }
 
+  // Detrend macro 2D lighting gradients across curved ROIs (forehead/chin) so directional
+  // shading is not miscounted as localized dark spots.
+  let detrendedL = lValues;
+  if (use2DPlane) {
+    const plane = fitLinearPlane(xCoords, yCoords, lValues);
+    if (plane) {
+      const [c0, c1, c2] = plane;
+      detrendedL = lValues.map(
+        (l, idx) => l - (c0 + c1 * xCoords[idx] + c2 * yCoords[idx])
+      );
+    }
+  }
+
   const sortedA = [...aValues].sort((x, y) => x - y);
-  const sortedL = [...lValues].sort((x, y) => x - y);
+  const sortedL = [...detrendedL].sort((x, y) => x - y);
   const medianA = percentileSorted(sortedA, 0.5);
   const p75L = percentileSorted(sortedL, 0.75);
 
@@ -182,7 +273,7 @@ export function computeRegionColorimetryFromRgba(
     if (aValues[i] - medianA >= REDNESS_ASTAR_MARGIN) {
       elevatedRedCount += 1;
     }
-    const deltaL = p75L - lValues[i];
+    const deltaL = p75L - detrendedL[i];
     if (deltaL >= DARK_SPOT_LSTAR_MARGIN) {
       darkSpotCount += 1;
       darkSpotDeltaSum += deltaL;

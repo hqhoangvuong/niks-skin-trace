@@ -6,7 +6,7 @@ import CoreImage
 /// operating on upright full-resolution facial ROI crops.
 /// Reports relative optical appearance proxies only (never clinical melanin concentration).
 enum TrueDepthColorimetryAnalyzer {
-    private static let algorithmVersion = "cielab-roi-srgb-v1"
+    private static let algorithmVersion = "cielab-roi-srgb-v2"
     private static let metricDefinitionVersion = "colorimetry-metrics-v1"
     private static let standardRegions = [
         "forehead",
@@ -102,12 +102,17 @@ enum TrueDepthColorimetryAnalyzer {
                 continue
             }
 
-            guard let rgba = renderToSRGBBytes(cgImage: cropped, srgbSpace: srgbSpace) else {
+            guard let raster = renderToSRGBBytes(cgImage: cropped, srgbSpace: srgbSpace) else {
                 regionResults.append(makeUnavailableRegion(regionKey, reason: "Failed to rasterize ROI pixels into sRGB."))
                 continue
             }
 
-            let metrics = computeRegionMetrics(rgba: rgba, region: regionKey)
+            let metrics = computeRegionMetrics(
+                rgba: raster.bytes,
+                width: raster.width,
+                height: raster.height,
+                region: regionKey
+            )
             if (metrics["state"] as? String) == "measured" {
                 measuredCount += 1
             } else if let reason = metrics["unavailableReason"] as? String {
@@ -171,7 +176,10 @@ enum TrueDepthColorimetryAnalyzer {
         ]
     }
 
-    private static func renderToSRGBBytes(cgImage: CGImage, srgbSpace: CGColorSpace) -> [UInt8]? {
+    private static func renderToSRGBBytes(
+        cgImage: CGImage,
+        srgbSpace: CGColorSpace
+    ) -> (bytes: [UInt8], width: Int, height: Int)? {
         let srcW = cgImage.width
         let srcH = cgImage.height
         let maxSrc = max(srcW, srcH)
@@ -200,7 +208,7 @@ enum TrueDepthColorimetryAnalyzer {
             ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: dstW, height: dstH))
             return true
         }
-        return drawn ? buffer : nil
+        return drawn ? (buffer, dstW, dstH) : nil
     }
 
     private static func srgbToLinear(_ c255: UInt8) -> Double {
@@ -212,16 +220,77 @@ enum TrueDepthColorimetryAnalyzer {
         return t > 0.008856 ? cbrt(t) : (7.787 * t + 16.0 / 116.0)
     }
 
-    private static func computeRegionMetrics(rgba: [UInt8], region: String) -> [String: Any] {
+    private static func fitLinearPlane(
+        xs: [Double],
+        ys: [Double],
+        vals: [Double]
+    ) -> (Double, Double, Double)? {
+        let n = vals.count
+        guard n >= 16 else { return nil }
+
+        var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0, syy = 0.0
+        var sv = 0.0, sxv = 0.0, syv = 0.0
+        for i in 0..<n {
+            let x = xs[i]
+            let y = ys[i]
+            let v = vals[i]
+            sx += x
+            sy += y
+            sxx += x * x
+            sxy += x * y
+            syy += y * y
+            sv += v
+            sxv += x * v
+            syv += y * v
+        }
+
+        let a00 = Double(n), a01 = sx, a02 = sy
+        let a11 = sxx, a12 = sxy, a22 = syy
+
+        let det =
+            a00 * (a11 * a22 - a12 * a12) -
+            a01 * (a01 * a22 - a12 * a02) +
+            a02 * (a01 * a12 - a11 * a02)
+        guard det.isFinite && abs(det) >= 1e-9 else { return nil }
+
+        let det0 =
+            sv * (a11 * a22 - a12 * a12) -
+            a01 * (sxv * a22 - a12 * syv) +
+            a02 * (sxv * a12 - a11 * syv)
+        let det1 =
+            a00 * (sxv * a22 - a12 * syv) -
+            sv * (a01 * a22 - a12 * a02) +
+            a02 * (a01 * syv - sxv * a02)
+        let det2 =
+            a00 * (a11 * syv - sxv * a12) -
+            a01 * (a01 * syv - sxv * a02) +
+            sv * (a01 * a12 - a11 * a02)
+
+        return (det0 / det, det1 / det, det2 / det)
+    }
+
+    private static func computeRegionMetrics(
+        rgba: [UInt8],
+        width: Int,
+        height: Int,
+        region: String
+    ) -> [String: Any] {
         let sampledCount = rgba.count / 4
         guard sampledCount > 0 else {
             return makeUnavailableRegion(region, reason: "No pixels sampled in ROI.")
         }
 
+        let use2DPlane = (width >= 4 && height >= 4 && width * height == sampledCount)
         var lValues: [Double] = []
         var aValues: [Double] = []
+        var xCoords: [Double] = []
+        var yCoords: [Double] = []
         lValues.reserveCapacity(sampledCount)
         aValues.reserveCapacity(sampledCount)
+        if use2DPlane {
+            xCoords.reserveCapacity(sampledCount)
+            yCoords.reserveCapacity(sampledCount)
+        }
 
         var sumL = 0.0
         var sumA = 0.0
@@ -263,6 +332,12 @@ enum TrueDepthColorimetryAnalyzer {
 
             lValues.append(lStar)
             aValues.append(aStar)
+            if use2DPlane {
+                let px = i % width
+                let py = i / width
+                xCoords.append(Double(px) / Double(width - 1) - 0.5)
+                yCoords.append(Double(py) / Double(height - 1) - 0.5)
+            }
             sumL += lStar
             sumA += aStar
             sumB += bStar
@@ -284,8 +359,15 @@ enum TrueDepthColorimetryAnalyzer {
             )
         }
 
+        var detrendedL = lValues
+        if use2DPlane, let (c0, c1, c2) = fitLinearPlane(xs: xCoords, ys: yCoords, vals: lValues) {
+            detrendedL = (0..<validCount).map { idx in
+                lValues[idx] - (c0 + c1 * xCoords[idx] + c2 * yCoords[idx])
+            }
+        }
+
         let sortedA = aValues.sorted()
-        let sortedL = lValues.sorted()
+        let sortedL = detrendedL.sorted()
         let medianA = sortedA[min(sortedA.count - 1, Int(Double(sortedA.count - 1) * 0.5))]
         let p75L = sortedL[min(sortedL.count - 1, Int(Double(sortedL.count - 1) * 0.75))]
 
@@ -297,7 +379,7 @@ enum TrueDepthColorimetryAnalyzer {
             if aValues[i] - medianA >= rednessAStarMargin {
                 elevatedRedCount += 1
             }
-            let deltaL = p75L - lValues[i]
+            let deltaL = p75L - detrendedL[i]
             if deltaL >= darkSpotLStarMargin {
                 darkSpotCount += 1
                 darkSpotDeltaSum += deltaL

@@ -415,40 +415,42 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
 
                 {blemishComparison.state === 'measured' && (
                   <>
-                    <table className="region-table" style={{ marginTop: 10 }}>
-                      <thead>
-                        <tr>
-                          <th>Region</th>
-                          <th>Active (Δ)</th>
-                          <th>Residual (Δ)</th>
-                          <th>Area Δ</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {blemishComparison.regionDeltas.map((row) => (
-                          <tr key={row.region}>
-                            <td>{FRIENDLY_REGION_LABELS[row.region]}</td>
-                            <td>
-                              {row.baselineActiveCount} →{' '}
-                              {row.currentActiveCount} (
-                              {row.activeDelta >= 0 ? '+' : ''}
-                              {row.activeDelta})
-                            </td>
-                            <td>
-                              {row.baselineResidualCount} →{' '}
-                              {row.currentResidualCount} (
-                              {row.residualDelta >= 0 ? '+' : ''}
-                              {row.residualDelta})
-                            </td>
-                            <td>
-                              {row.areaDeltaMm2 !== null
-                                ? `${row.areaDeltaMm2 >= 0 ? '+' : ''}${row.areaDeltaMm2.toFixed(1)} mm²`
-                                : '—'}
-                            </td>
+                    <div className="table-scroll" style={{ marginTop: 10 }}>
+                      <table className="region-table">
+                        <thead>
+                          <tr>
+                            <th>Region</th>
+                            <th>Active (Δ)</th>
+                            <th>Residual (Δ)</th>
+                            <th>Area Δ</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {blemishComparison.regionDeltas.map((row) => (
+                            <tr key={row.region}>
+                              <td>{FRIENDLY_REGION_LABELS[row.region]}</td>
+                              <td>
+                                {row.baselineActiveCount} →{' '}
+                                {row.currentActiveCount} (
+                                {row.activeDelta >= 0 ? '+' : ''}
+                                {row.activeDelta})
+                              </td>
+                              <td>
+                                {row.baselineResidualCount} →{' '}
+                                {row.currentResidualCount} (
+                                {row.residualDelta >= 0 ? '+' : ''}
+                                {row.residualDelta})
+                              </td>
+                              <td>
+                                {row.areaDeltaMm2 !== null
+                                  ? `${row.areaDeltaMm2 >= 0 ? '+' : ''}${row.areaDeltaMm2.toFixed(1)} mm²`
+                                  : '—'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                     <p className="subtitle" style={{ marginTop: 8 }}>
                       Visible count differences reflect annotated/detected
                       regions only and do not establish product causation. A
@@ -491,50 +493,52 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
 
                 {colorimetryComparison.state === 'measured' && (
                   <>
-                    <table className="region-table" style={{ marginTop: 10 }}>
-                      <thead>
-                        <tr>
-                          <th>Region</th>
-                          <th>Redness Δa* / Area</th>
-                          <th>Redness Status</th>
-                          <th>Dark-Spot Area / ΔL*</th>
-                          <th>Spot Status</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {colorimetryComparison.regionDeltas.map((row) => (
-                          <tr key={row.region}>
-                            <td>{FRIENDLY_REGION_LABELS[row.region]}</td>
-                            {row.state === 'measured' ? (
-                              <>
-                                <td>
-                                  {row.deltaAStar !== null
-                                    ? `${row.deltaAStar >= 0 ? '+' : ''}${row.deltaAStar.toFixed(1)}`
-                                    : '—'}{' '}
-                                  /{' '}
-                                  {row.deltaRednessAreaPctPts !== null
-                                    ? `${row.deltaRednessAreaPctPts >= 0 ? '+' : ''}${row.deltaRednessAreaPctPts.toFixed(1)}pp`
-                                    : '—'}
-                                </td>
-                                <td>{row.rednessStatus.replace(/_/g, ' ')}</td>
-                                <td>
-                                  {row.deltaDarkSpotAreaPctPts !== null
-                                    ? `${row.deltaDarkSpotAreaPctPts >= 0 ? '+' : ''}${row.deltaDarkSpotAreaPctPts.toFixed(1)}pp`
-                                    : '—'}{' '}
-                                  /{' '}
-                                  {row.deltaDarkSpotContrastL !== null
-                                    ? `${row.deltaDarkSpotContrastL >= 0 ? '+' : ''}${row.deltaDarkSpotContrastL.toFixed(1)}`
-                                    : '—'}
-                                </td>
-                                <td>{row.darkSpotStatus.replace(/_/g, ' ')}</td>
-                              </>
-                            ) : (
-                              <td colSpan={4}>Unavailable (low valid skin)</td>
-                            )}
+                    <div className="table-scroll" style={{ marginTop: 10 }}>
+                      <table className="region-table">
+                        <thead>
+                          <tr>
+                            <th>Region</th>
+                            <th>Redness Δa* / Area</th>
+                            <th>Redness Status</th>
+                            <th>Dark-Spot Area / ΔL*</th>
+                            <th>Spot Status</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {colorimetryComparison.regionDeltas.map((row) => (
+                            <tr key={row.region}>
+                              <td>{FRIENDLY_REGION_LABELS[row.region]}</td>
+                              {row.state === 'measured' ? (
+                                <>
+                                  <td>
+                                    {row.deltaAStar !== null
+                                      ? `${row.deltaAStar >= 0 ? '+' : ''}${row.deltaAStar.toFixed(1)}`
+                                      : '—'}{' '}
+                                    /{' '}
+                                    {row.deltaRednessAreaPctPts !== null
+                                      ? `${row.deltaRednessAreaPctPts >= 0 ? '+' : ''}${row.deltaRednessAreaPctPts.toFixed(1)}pp`
+                                      : '—'}
+                                  </td>
+                                  <td>{row.rednessStatus.replace(/_/g, ' ')}</td>
+                                  <td>
+                                    {row.deltaDarkSpotAreaPctPts !== null
+                                      ? `${row.deltaDarkSpotAreaPctPts >= 0 ? '+' : ''}${row.deltaDarkSpotAreaPctPts.toFixed(1)}pp`
+                                      : '—'}{' '}
+                                    /{' '}
+                                    {row.deltaDarkSpotContrastL !== null
+                                      ? `${row.deltaDarkSpotContrastL >= 0 ? '+' : ''}${row.deltaDarkSpotContrastL.toFixed(1)}`
+                                      : '—'}
+                                  </td>
+                                  <td>{row.darkSpotStatus.replace(/_/g, ' ')}</td>
+                                </>
+                              ) : (
+                                <td colSpan={4}>Unavailable (low valid skin)</td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                     <p className="subtitle" style={{ marginTop: 8 }}>
                       Appearance proxies gated to ≤ 0.75 EV, ≤ 0.20 WB gain, and
                       ≤ 4.0 cm distance shift. Small shifts inside the noise

@@ -531,32 +531,34 @@ export function BlemishInspector({
             or run a bundled Core ML model to produce measured region counts.
           </p>
         ) : (
-          <table className="region-table">
-            <thead>
-              <tr>
-                <th>Region</th>
-                <th>Active</th>
-                <th>Residual</th>
-                <th>Uncertain</th>
-                <th>Area</th>
-              </tr>
-            </thead>
-            <tbody>
-              {regionSummaries.map((row) => (
-                <tr key={row.region}>
-                  <td>{REGION_LABELS[row.region]}</td>
-                  <td>{row.activeBlemishCount}</td>
-                  <td>{row.residualMarkCount}</td>
-                  <td>{row.uncertainCount}</td>
-                  <td>
-                    {row.affectedAreaMm2 !== null
-                      ? `${row.affectedAreaMm2.toFixed(1)} mm²`
-                      : `${(row.affectedAreaNormalized * 100).toFixed(2)}%`}
-                  </td>
+          <div className="table-scroll">
+            <table className="region-table">
+              <thead>
+                <tr>
+                  <th>Region</th>
+                  <th>Active</th>
+                  <th>Residual</th>
+                  <th>Uncertain</th>
+                  <th>Area</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {regionSummaries.map((row) => (
+                  <tr key={row.region}>
+                    <td>{REGION_LABELS[row.region]}</td>
+                    <td>{row.activeBlemishCount}</td>
+                    <td>{row.residualMarkCount}</td>
+                    <td>{row.uncertainCount}</td>
+                    <td>
+                      {row.affectedAreaMm2 !== null
+                        ? `${row.affectedAreaMm2.toFixed(1)} mm²`
+                        : `${(row.affectedAreaNormalized * 100).toFixed(2)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -576,56 +578,58 @@ export function BlemishInspector({
           </div>
         ) : (
           <>
-            <table className="region-table">
-              <thead>
-                <tr>
-                  <th>Region</th>
-                  <th>Valid Skin</th>
-                  <th>Redness (a* / EI)</th>
-                  <th>Patchy Red</th>
-                  <th>Dark Spots (ΔL*)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(colorimetry.regions ?? []).map((row) => (
-                  <tr key={row.region}>
-                    <td>{REGION_LABELS[row.region]}</td>
-                    <td>{(row.validSkinPixelRatio * 100).toFixed(0)}%</td>
-                    {row.state === 'measured' ? (
-                      <>
-                        <td>
-                          {row.meanAStar !== null
-                            ? row.meanAStar.toFixed(1)
-                            : '—'}{' '}
-                          /{' '}
-                          {row.erythemaIndex !== null
-                            ? row.erythemaIndex.toFixed(1)
-                            : '—'}
-                        </td>
-                        <td>
-                          {row.elevatedRednessAreaFraction !== null
-                            ? `${(row.elevatedRednessAreaFraction * 100).toFixed(1)}%`
-                            : '—'}
-                        </td>
-                        <td>
-                          {row.darkSpotContrastAreaFraction !== null
-                            ? `${(row.darkSpotContrastAreaFraction * 100).toFixed(1)}%`
-                            : '—'}
-                          {row.darkSpotContrastDeltaL !== null &&
-                          row.darkSpotContrastDeltaL > 0
-                            ? ` (${row.darkSpotContrastDeltaL.toFixed(1)} L*)`
-                            : ''}
-                        </td>
-                      </>
-                    ) : (
-                      <td colSpan={3}>
-                        Unavailable ({row.unavailableReason ?? 'low valid skin'})
-                      </td>
-                    )}
+            <div className="table-scroll">
+              <table className="region-table">
+                <thead>
+                  <tr>
+                    <th>Region</th>
+                    <th>Valid Skin</th>
+                    <th>Redness (a* / EI)</th>
+                    <th>Patchy Red</th>
+                    <th>Dark Spots (ΔL*)</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {(colorimetry.regions ?? []).map((row) => (
+                    <tr key={row.region}>
+                      <td>{REGION_LABELS[row.region]}</td>
+                      <td>{(row.validSkinPixelRatio * 100).toFixed(0)}%</td>
+                      {row.state === 'measured' ? (
+                        <>
+                          <td>
+                            {row.meanAStar !== null
+                              ? row.meanAStar.toFixed(1)
+                              : '—'}{' '}
+                            /{' '}
+                            {row.erythemaIndex !== null
+                              ? row.erythemaIndex.toFixed(1)
+                              : '—'}
+                          </td>
+                          <td>
+                            {row.elevatedRednessAreaFraction !== null
+                              ? `${(row.elevatedRednessAreaFraction * 100).toFixed(1)}%`
+                              : '—'}
+                          </td>
+                          <td>
+                            {row.darkSpotContrastAreaFraction !== null
+                              ? `${(row.darkSpotContrastAreaFraction * 100).toFixed(1)}%`
+                              : '—'}
+                            {row.darkSpotContrastDeltaL !== null &&
+                            row.darkSpotContrastDeltaL > 0
+                              ? ` (${row.darkSpotContrastDeltaL.toFixed(1)} L*)`
+                              : ''}
+                          </td>
+                        </>
+                      ) : (
+                        <td colSpan={3}>
+                          Unavailable ({row.unavailableReason ?? 'low valid skin'})
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             <p className="subtitle" style={{ marginTop: 6 }}>
               Optical appearance proxies computed on sRGB skin pixels (glare &amp;
               deep shadow excluded) — not physiological melanin concentration or

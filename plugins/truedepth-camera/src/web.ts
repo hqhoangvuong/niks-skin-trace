@@ -363,7 +363,7 @@ export class TrueDepthCameraWeb
       state: 'unavailable',
       unavailableReason:
         'Full-resolution sRGB CIELAB facial ROI colorimetry requires native iOS execution with Vision facial landmarks.',
-      algorithmVersion: 'cielab-roi-srgb-v1',
+      algorithmVersion: 'cielab-roi-srgb-v2',
       metricDefinitionVersion: 'colorimetry-metrics-v1',
       colorSpace: 'sRGB_D65',
       computationTimeMs: 0,

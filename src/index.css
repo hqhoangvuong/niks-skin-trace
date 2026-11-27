@@ -566,22 +566,29 @@ pre.json-box {
   border: 2px dashed var(--ok);
 }
 
+.table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 .region-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
 .region-table th,
 .region-table td {
   text-align: left;
-  padding: 7px 8px;
+  padding: 6px 6px;
   border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
 .region-table th {
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
 }

@@ -382,4 +382,106 @@ describe('colorimetryMetrics', () => {
     );
     assert.equal(res2.state, 'unavailable');
   });
+
+  it('detrends 2D illumination shading gradients while still detecting localized dark spots', () => {
+    const width = 20;
+    const height = 20;
+    const shaded = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      // Strong linear top-to-bottom lighting gradient (brighter forehead/chin top -> darker bottom)
+      const factor = 1.0 - (y / (height - 1)) * 0.35;
+      const r = Math.round(210 * factor);
+      const g = Math.round(170 * factor);
+      const b = Math.round(150 * factor);
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        shaded[idx] = r;
+        shaded[idx + 1] = g;
+        shaded[idx + 2] = b;
+        shaded[idx + 3] = 255;
+      }
+    }
+
+    const shadedOnly = computeRegionColorimetryFromRgba(
+      shaded,
+      'chin',
+      width,
+      height
+    );
+    assert.equal(shadedOnly.state, 'measured');
+    assert.ok(
+      (shadedOnly.darkSpotContrastAreaFraction ?? 1) < 0.01,
+      `Pure 2D shadow gradient should produce ~0% dark spots, got ${shadedOnly.darkSpotContrastAreaFraction}`
+    );
+
+    // Inject a localized 4x4 (4%) dark spot near the center of the same shaded ROI
+    const withSpot = new Uint8ClampedArray(shaded);
+    for (let y = 8; y < 12; y++) {
+      for (let x = 8; x < 12; x++) {
+        const idx = (y * width + x) * 4;
+        withSpot[idx] = Math.round(withSpot[idx] * 0.72);
+        withSpot[idx + 1] = Math.round(withSpot[idx + 1] * 0.72);
+        withSpot[idx + 2] = Math.round(withSpot[idx + 2] * 0.72);
+      }
+    }
+    const shadedWithSpot = computeRegionColorimetryFromRgba(
+      withSpot,
+      'chin',
+      width,
+      height
+    );
+    assert.ok(
+      Math.abs((shadedWithSpot.darkSpotContrastAreaFraction ?? 0) - 0.04) <
+        0.015,
+      `Localized 4% spot inside shaded ROI should be detected (~0.04), got ${shadedWithSpot.darkSpotContrastAreaFraction}`
+    );
+  });
+
+  it('treats +/-1.8pp repeat-capture cheek dark-spot jitter as no_clear_change under calibrated 3.0pp noise floor', () => {
+    const b = makeCapture('b', {
+      colorimetryAnalysis: makeColorimetryRecord('b', {
+        regions: [
+          makeRegionMetric('forehead'),
+          makeRegionMetric('anatomicalLeftCheek', {
+            darkSpotContrastAreaFraction: 0.05,
+            darkSpotContrastDeltaL: 7.2,
+          }),
+          makeRegionMetric('anatomicalRightCheek', {
+            darkSpotContrastAreaFraction: 0.05,
+            darkSpotContrastDeltaL: 7.2,
+          }),
+          makeRegionMetric('chin'),
+        ],
+      }),
+    });
+    const c = makeCapture('c', {
+      colorimetryAnalysis: makeColorimetryRecord('c', {
+        regions: [
+          makeRegionMetric('forehead'),
+          makeRegionMetric('anatomicalLeftCheek', {
+            darkSpotContrastAreaFraction: 0.068, // +1.8pp
+            darkSpotContrastDeltaL: 6.9,
+          }),
+          makeRegionMetric('anatomicalRightCheek', {
+            darkSpotContrastAreaFraction: 0.032, // -1.8pp
+            darkSpotContrastDeltaL: 7.1,
+          }),
+          makeRegionMetric('chin'),
+        ],
+      }),
+    });
+
+    const cmp = compareColorimetryAnalyses(b, c, makeGate('b', 'c'));
+    assert.equal(cmp.state, 'measured');
+    assert.equal(
+      cmp.regionDeltas.find((r) => r.region === 'anatomicalLeftCheek')
+        ?.darkSpotStatus,
+      'no_clear_change'
+    );
+    assert.equal(
+      cmp.regionDeltas.find((r) => r.region === 'anatomicalRightCheek')
+        ?.darkSpotStatus,
+      'no_clear_change'
+    );
+  });
 });
