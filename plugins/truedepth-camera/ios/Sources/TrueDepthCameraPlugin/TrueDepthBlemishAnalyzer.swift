@@ -16,7 +16,7 @@ struct BlemishModelManifest: Decodable {
 
 /// On-device Core ML ROI-crop blemish analyzer.
 /// Requires an explicit app-bundled `BlemishDetector.mlmodelc` + `blemish_model_manifest.json`.
-/// Never fabricates detections when no licensed model is bundled.
+/// Never fabricates detections or coerces failed/incompatible inference into a measured zero.
 enum TrueDepthBlemishAnalyzer {
     private static let metricDefinitionVersion = "blemish-metrics-v1"
     private static let standardRegions = [
@@ -30,6 +30,10 @@ enum TrueDepthBlemishAnalyzer {
         "papule_pustule",
         "nodule_cyst",
         "active_blemish_unspecified"
+    ]
+    private static let residualCategories: Set<String> = [
+        "residual_red_mark_pie",
+        "residual_dark_spot_pih"
     ]
 
     private struct RawDetection {
@@ -129,12 +133,14 @@ enum TrueDepthBlemishAnalyzer {
             warnings.append("Model licenseScope is '\(manifest.licenseScope)' — outputs are for research/evaluation only.")
         }
 
-        // Extract high-detail ROI boxes from facialAlignment.regions (fall back to faceBoundingBox).
+        // Parse unpadded ROI boxes so region assignment matches TS assignLesionToRegion 1:1.
+        var unpaddedRegions: [String: CGRect] = [:]
         var cropJobs: [(region: String, rect: CGRect)] = []
         if let alignment = sessionMeta["facialAlignment"] as? [String: Any],
            let regionsDict = alignment["regions"] as? [String: Any] {
             for regionKey in standardRegions {
                 if let r = parseNormalizedRect(regionsDict[regionKey]) {
+                    unpaddedRegions[regionKey] = r
                     cropJobs.append((regionKey, padAndClamp(r, padFraction: 0.08)))
                 }
             }
@@ -150,6 +156,9 @@ enum TrueDepthBlemishAnalyzer {
         }
 
         var rawDetections: [RawDetection] = []
+        var successfulRoiCount = 0
+        var failedRoiReasons: [String] = []
+
         for job in cropJobs {
             let pixelRect = CGRect(
                 x: (job.rect.minX * imgWidth).rounded(.down),
@@ -160,6 +169,7 @@ enum TrueDepthBlemishAnalyzer {
 
             guard pixelRect.width >= 16, pixelRect.height >= 16,
                   let cropped = fullCGImage.cropping(to: pixelRect) else {
+                failedRoiReasons.append("ROI '\(job.region)' crop was too small or invalid.")
                 continue
             }
 
@@ -169,13 +179,19 @@ enum TrueDepthBlemishAnalyzer {
             do {
                 try handler.perform([request])
             } catch {
-                warnings.append("ROI '\(job.region)' inference failed: \(error.localizedDescription)")
+                failedRoiReasons.append("ROI '\(job.region)' inference failed: \(error.localizedDescription)")
                 continue
             }
 
-            guard let observations = request.results as? [VNRecognizedObjectObservation] else {
-                continue
+            let rawResults = request.results ?? []
+            if !rawResults.isEmpty && !(rawResults is [VNRecognizedObjectObservation]) {
+                return unavailable(
+                    "Bundled Core ML model did not return VNRecognizedObjectObservation detections (incompatible model output type)."
+                )
             }
+
+            successfulRoiCount += 1
+            let observations = (rawResults as? [VNRecognizedObjectObservation]) ?? []
 
             let cropNormX = Double(pixelRect.minX / imgWidth)
             let cropNormY = Double(pixelRect.minY / imgHeight)
@@ -185,29 +201,51 @@ enum TrueDepthBlemishAnalyzer {
             for obs in observations {
                 guard let topLabel = obs.labels.first else { continue }
                 let conf = Double(topLabel.confidence)
-                guard conf >= uncThresh else { continue }
+                guard conf.isFinite && conf >= uncThresh else { continue }
 
-                let mappedCategory = manifest.classMap[topLabel.identifier] ?? "active_blemish_unspecified"
-                // Convert Vision bottom-left crop box to full-image top-left normalized box.
+                // Never coerce unmapped/background labels into active acne.
+                guard let mappedCategory = manifest.classMap[topLabel.identifier],
+                      activeCategories.contains(mappedCategory) || residualCategories.contains(mappedCategory) else {
+                    warnings.append("Ignored unmapped model label '\(topLabel.identifier)'.")
+                    continue
+                }
+
                 let localTopY = 1.0 - Double(obs.boundingBox.maxY)
-                let fullRect = CGRect(
+                let rawRect = CGRect(
                     x: cropNormX + Double(obs.boundingBox.minX) * cropNormW,
                     y: cropNormY + localTopY * cropNormH,
                     width: Double(obs.boundingBox.width) * cropNormW,
                     height: Double(obs.boundingBox.height) * cropNormH
                 )
+                let clampedRect = rawRect.intersection(CGRect(x: 0, y: 0, width: 1, height: 1))
+                guard !clampedRect.isNull && !clampedRect.isEmpty,
+                      clampedRect.minX.isFinite, clampedRect.minY.isFinite,
+                      clampedRect.width.isFinite, clampedRect.height.isFinite else {
+                    continue
+                }
 
+                let center = CGPoint(x: clampedRect.midX, y: clampedRect.midY)
+                let assignedRegion = assignRegion(center: center, unpaddedRegions: unpaddedRegions)
                 let uncertainty = conf >= confThresh ? "confident" : "uncertain"
                 rawDetections.append(
                     RawDetection(
-                        region: job.region,
+                        region: assignedRegion,
                         category: mappedCategory,
-                        bbox: fullRect,
+                        bbox: clampedRect,
                         confidence: conf,
                         uncertaintyState: uncertainty
                     )
                 )
             }
+        }
+
+        // Never coerce failed ROI inference into a measured zero.
+        if successfulRoiCount == 0 || !failedRoiReasons.isEmpty {
+            let reason = failedRoiReasons.joined(separator: " ")
+            return unavailable(
+                "Core ML inference incomplete (\(successfulRoiCount)/\(cropJobs.count) ROIs succeeded): \(reason)",
+                warnings: warnings
+            )
         }
 
         let deduped = applyIoUNMS(rawDetections, iouThreshold: 0.45)
@@ -249,7 +287,7 @@ enum TrueDepthBlemishAnalyzer {
                 b.normArea += Double(det.bbox.width * det.bbox.height)
                 if activeCategories.contains(det.category) {
                     b.active += 1
-                } else {
+                } else if residualCategories.contains(det.category) {
                     b.residual += 1
                 }
             }
@@ -295,8 +333,25 @@ enum TrueDepthBlemishAnalyzer {
             "warnings": warnings
         ]
 
-        _ = try? TrueDepthCaptureManager.saveSessionAnalysis(sessionId: sessionId, analysis: record)
+        do {
+            let saved = try TrueDepthCaptureManager.saveSessionAnalysis(sessionId: sessionId, analysis: record)
+            if !saved {
+                return unavailable("Failed to persist Core ML analysis.json locally.", warnings: warnings)
+            }
+        } catch {
+            return unavailable("Failed to persist Core ML analysis.json: \(error.localizedDescription)", warnings: warnings)
+        }
+
         return record
+    }
+
+    private static func assignRegion(center: CGPoint, unpaddedRegions: [String: CGRect]) -> String {
+        for key in standardRegions {
+            if let rect = unpaddedRegions[key], rect.contains(center) {
+                return key
+            }
+        }
+        return "other"
     }
 
     private static func parseNormalizedRect(_ value: Any?) -> CGRect? {
@@ -305,6 +360,7 @@ enum TrueDepthBlemishAnalyzer {
               let y = dict["y"] as? Double,
               let w = dict["width"] as? Double,
               let h = dict["height"] as? Double,
+              x.isFinite, y.isFinite, w.isFinite, h.isFinite,
               w > 0, h > 0 else {
             return nil
         }

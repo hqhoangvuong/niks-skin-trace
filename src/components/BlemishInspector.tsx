@@ -37,6 +37,13 @@ const REGION_LABELS: Record<FacialRegionId, string> = {
   other: 'Other / Outside ROI',
 };
 
+function createPinId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `pin-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
 export function BlemishInspector({
   session,
   onAnalysisSaved,
@@ -76,28 +83,52 @@ export function BlemishInspector({
   async function persistLesions(
     nextLesions: CandidateLesion[],
     preserveExistingModelMeta = false
-  ) {
+  ): Promise<boolean> {
     setBusy('save');
     setStatusMsg(null);
     try {
-      const nextRecord: BlemishAnalysisRecord =
-        preserveExistingModelMeta && analysis && analysis.state === 'measured'
-          ? {
-              ...analysis,
-              analyzedAtIso: new Date().toISOString(),
-              lesions: nextLesions,
-              regions: summarizeRegionMetrics(nextLesions, capture),
-            }
-          : buildManualAnalysisRecord(capture.sessionId, nextLesions, capture);
+      const keepModelMeta =
+        preserveExistingModelMeta &&
+        analysis &&
+        analysis.state === 'measured' &&
+        analysis.source !== 'manual_annotation';
 
-      await cameraBridge.saveSessionAnalysis(capture.sessionId, nextRecord);
+      const nextRecord: BlemishAnalysisRecord = keepModelMeta
+        ? {
+            ...analysis,
+            analyzedAtIso: new Date().toISOString(),
+            lesions: nextLesions,
+            regions: summarizeRegionMetrics(nextLesions, capture),
+            warnings: analysis.warnings.includes(
+              'Includes manual pin verification/edits on top of model detections.'
+            )
+              ? analysis.warnings
+              : [
+                  ...analysis.warnings,
+                  'Includes manual pin verification/edits on top of model detections.',
+                ],
+          }
+        : buildManualAnalysisRecord(capture.sessionId, nextLesions, capture);
+
+      const saved = await cameraBridge.saveSessionAnalysis(
+        capture.sessionId,
+        nextRecord
+      );
+      if (!saved) {
+        setStatusMsg(
+          'Failed to persist analysis locally (session storage unavailable).'
+        );
+        return false;
+      }
       setLesions(nextLesions);
       setAnalysis(nextRecord);
       onAnalysisSaved(capture.sessionId, nextRecord);
+      return true;
     } catch (err) {
       setStatusMsg(
         err instanceof Error ? err.message : 'Failed to persist local analysis.'
       );
+      return false;
     } finally {
       setBusy(null);
     }
@@ -116,13 +147,13 @@ export function BlemishInspector({
     const region = assignLesionToRegion({ x, y }, regions);
 
     const newLesion: CandidateLesion = {
-      id: crypto.randomUUID(),
+      id: createPinId(),
       region,
       category: selectedCategory,
       centerNormalized: { x, y },
       bboxNormalized: {
-        x: Math.max(0, x - boxW / 2),
-        y: Math.max(0, y - boxH / 2),
+        x: Math.min(1 - boxW, Math.max(0, x - boxW / 2)),
+        y: Math.min(1 - boxH, Math.max(0, y - boxH / 2)),
         width: boxW,
         height: boxH,
       },
@@ -132,8 +163,12 @@ export function BlemishInspector({
     };
 
     const nextLesions = [...lesions, newLesion];
-    setSelectedLesionId(newLesion.id);
-    await persistLesions(nextLesions, false);
+    // Preserve model provenance if annotating atop model detections so comparability gate cannot be bypassed.
+    const preserveModel = analysis?.source !== 'manual_annotation';
+    const saved = await persistLesions(nextLesions, preserveModel);
+    if (saved) {
+      setSelectedLesionId(newLesion.id);
+    }
   }
 
   async function handleUpdateUncertainty(
@@ -148,15 +183,23 @@ export function BlemishInspector({
 
   async function handleDeleteLesion(id: string) {
     const nextLesions = lesions.filter((l) => l.id !== id);
-    if (selectedLesionId === id) setSelectedLesionId(null);
-    await persistLesions(nextLesions, analysis?.source !== 'manual_annotation');
+    const saved = await persistLesions(
+      nextLesions,
+      analysis?.source !== 'manual_annotation'
+    );
+    if (saved && selectedLesionId === id) {
+      setSelectedLesionId(null);
+    }
   }
 
   async function handleMarkClearZero() {
-    await persistLesions([], false);
-    setStatusMsg(
-      'Saved measured manual annotation with 0 blemishes (distinct from not_analyzed).'
-    );
+    const saved = await persistLesions([], false);
+    if (saved) {
+      setSelectedLesionId(null);
+      setStatusMsg(
+        'Saved measured manual annotation with 0 blemishes (distinct from not_analyzed).'
+      );
+    }
   }
 
   async function handleRunCoreML() {
@@ -190,8 +233,11 @@ export function BlemishInspector({
 
   async function handleCopyAnalysisJson() {
     const payload =
-      analysis ??
-      buildManualAnalysisRecord(capture.sessionId, lesions, capture);
+      analysis ?? {
+        sessionId: capture.sessionId,
+        state: 'not_analyzed',
+        note: 'No blemish annotation or model inference has been recorded for this session.',
+      };
     try {
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
       setCopied(true);
@@ -432,32 +478,39 @@ export function BlemishInspector({
 
       <div style={{ marginTop: 16 }}>
         <h2>Per-Region Summary</h2>
-        <table className="region-table">
-          <thead>
-            <tr>
-              <th>Region</th>
-              <th>Active</th>
-              <th>Residual</th>
-              <th>Uncertain</th>
-              <th>Area</th>
-            </tr>
-          </thead>
-          <tbody>
-            {regionSummaries.map((row) => (
-              <tr key={row.region}>
-                <td>{REGION_LABELS[row.region]}</td>
-                <td>{row.activeBlemishCount}</td>
-                <td>{row.residualMarkCount}</td>
-                <td>{row.uncertainCount}</td>
-                <td>
-                  {row.affectedAreaMm2 !== null
-                    ? `${row.affectedAreaMm2.toFixed(1)} mm²`
-                    : `${(row.affectedAreaNormalized * 100).toFixed(2)}%`}
-                </td>
+        {analysis?.state !== 'measured' ? (
+          <p className="subtitle">
+            Not analyzed yet — place pins, tap <strong>Record Verified 0</strong>,
+            or run a bundled Core ML model to produce measured region counts.
+          </p>
+        ) : (
+          <table className="region-table">
+            <thead>
+              <tr>
+                <th>Region</th>
+                <th>Active</th>
+                <th>Residual</th>
+                <th>Uncertain</th>
+                <th>Area</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {regionSummaries.map((row) => (
+                <tr key={row.region}>
+                  <td>{REGION_LABELS[row.region]}</td>
+                  <td>{row.activeBlemishCount}</td>
+                  <td>{row.residualMarkCount}</td>
+                  <td>{row.uncertainCount}</td>
+                  <td>
+                    {row.affectedAreaMm2 !== null
+                      ? `${row.affectedAreaMm2.toFixed(1)} mm²`
+                      : `${(row.affectedAreaNormalized * 100).toFixed(2)}%`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </section>
   );

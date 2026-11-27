@@ -389,6 +389,9 @@ final class TrueDepthCaptureManager: NSObject {
 
     static func saveSessionAnalysis(sessionId: String, analysis: [String: Any]) throws -> Bool {
         guard UUID(uuidString: sessionId) != nil else { return false }
+        guard JSONSerialization.isValidJSONObject(analysis) else {
+            throw TrueDepthCaptureError.persistenceFailed("Analysis payload contains non-JSON-serializable values (e.g. NaN or Infinity).")
+        }
         let sessionDir = sessionsRootURL.appendingPathComponent(sessionId, isDirectory: true)
         guard FileManager.default.fileExists(atPath: sessionDir.path) else { return false }
         let data = try JSONSerialization.data(withJSONObject: analysis, options: [.prettyPrinted, .sortedKeys])

@@ -355,4 +355,89 @@ describe('blemishMetrics', () => {
     const summary = summarizeRegionMetrics([], legacy);
     assert.equal(summary.length, 4);
   });
+
+  it('accounts for 3:4 upright portrait aspect ratio when matching rotated chin lesions', () => {
+    // Baseline upright (0 deg roll), chin lesion at (0.50, 0.84) -> dy = +0.44 below eye midpoint (0.50, 0.40)
+    const s1 = makeCapture('s1');
+    s1.blemishAnalysis = buildManualAnalysisRecord(
+      's1',
+      [
+        {
+          id: 'chin-1',
+          region: 'chin',
+          category: 'papule_pustule',
+          centerNormalized: { x: 0.5, y: 0.84 },
+          bboxNormalized: { x: 0.495, y: 0.835, width: 0.01, height: 0.01 },
+          confidence: null,
+          uncertaintyState: 'user_verified',
+          source: 'manual_annotation',
+        },
+      ],
+      s1
+    );
+
+    // Current rotated by -15 deg in upright 3:4 portrait space (aspect = 3024/4032 = 0.75):
+    // Rotating baseline offset (0, +0.44) by -15 deg in isotropic space:
+    // dxIso = -0.44 * sin(-15deg) = +0.11388 -> dxNorm = +0.11388 / 0.75 = +0.15184
+    // dyIso = +0.44 * cos(-15deg) = +0.42501 -> yNorm = 0.40 + 0.42501 = 0.82501
+    const rad = (-15 * Math.PI) / 180;
+    const aspect = 3024 / 4032;
+    const currX = 0.5 + (-0.44 * Math.sin(rad)) / aspect;
+    const currY = 0.4 + 0.44 * Math.cos(rad);
+
+    const s2 = makeCapture('s2', {
+      facialAlignment: {
+        ...s1.facialAlignment!,
+        eyeLineAngleDegrees: -15,
+      },
+    });
+    s2.blemishAnalysis = buildManualAnalysisRecord(
+      's2',
+      [
+        {
+          id: 'chin-2',
+          region: 'chin',
+          category: 'papule_pustule',
+          centerNormalized: { x: currX, y: currY },
+          bboxNormalized: {
+            x: currX - 0.005,
+            y: currY - 0.005,
+            width: 0.01,
+            height: 0.01,
+          },
+          confidence: null,
+          uncertaintyState: 'user_verified',
+          source: 'manual_annotation',
+        },
+      ],
+      s2
+    );
+
+    const res = compareBlemishAnalyses(s1, s2, makeComparableGate('s1', 's2'));
+    assert.equal(res.state, 'measured');
+    assert.equal(
+      res.trackedLesions.filter((t) => t.status === 'persisting').length,
+      1,
+      'Chin lesion rotated 15° on 3:4 portrait capture should match as persisting'
+    );
+  });
+
+  it('ignores unknown category strings instead of coercing them into residualMarkCount', () => {
+    const cap = makeCapture('s1');
+    const badLesion = {
+      id: 'bad-1',
+      region: 'forehead',
+      category: 'unknown_artifact' as unknown as CandidateLesion['category'],
+      centerNormalized: { x: 0.5, y: 0.2 },
+      bboxNormalized: { x: 0.495, y: 0.195, width: 0.01, height: 0.01 },
+      confidence: 0.9,
+      uncertaintyState: 'confident',
+      source: 'research_coreml_model',
+    } satisfies CandidateLesion;
+
+    const summary = summarizeRegionMetrics([badLesion], cap);
+    const forehead = summary.find((r) => r.region === 'forehead');
+    assert.equal(forehead?.activeBlemishCount, 0);
+    assert.equal(forehead?.residualMarkCount, 0);
+  });
 });

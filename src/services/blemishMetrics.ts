@@ -68,6 +68,13 @@ export function isActiveBlemishCategory(category: LesionCategory): boolean {
   );
 }
 
+export function isResidualMarkCategory(category: LesionCategory): boolean {
+  return (
+    category === 'residual_red_mark_pie' ||
+    category === 'residual_dark_spot_pih'
+  );
+}
+
 function pointInRect(pt: NormalizedPoint, rect?: NormalizedRect): boolean {
   if (!rect) return false;
   return (
@@ -131,13 +138,17 @@ export function summarizeRegionMetrics(
       continue;
     }
 
+    const isActive = isActiveBlemishCategory(lesion.category);
+    const isResidual = isResidualMarkCategory(lesion.category);
+    if (!isActive && !isResidual) continue;
+
     const boxArea = Math.max(
       0,
       lesion.bboxNormalized.width * lesion.bboxNormalized.height
     );
     bucket.normArea += boxArea;
 
-    if (isActiveBlemishCategory(lesion.category)) {
+    if (isActive) {
       bucket.active += 1;
     } else {
       bucket.residual += 1;
@@ -194,12 +205,23 @@ export function buildManualAnalysisRecord(
   };
 }
 
+function uprightAspectRatio(capture: NativeCaptureRecord): number {
+  const w = capture.rgbDimensions.width;
+  const h = capture.rgbDimensions.height;
+  if (!(w > 0 && h > 0)) return 0.75;
+  // Native iOS portrait captures store sensor-landscape rgbDimensions (e.g. 4032x3024)
+  // while Vision landmarks and EXIF upright display are portrait (3024x4032 -> 0.75).
+  if (capture.platform === 'ios' && w > h) {
+    return h / w;
+  }
+  return w / h;
+}
+
 function projectCurrentPointToBaseline(
   pt: NormalizedPoint,
-  baseline: NativeCaptureRecord,
-  current: NativeCaptureRecord
+  current: NativeCaptureRecord,
+  alignment: ReturnType<typeof computePairAlignmentTransform>
 ): NormalizedPoint {
-  const alignment = computePairAlignmentTransform(baseline, current);
   if (alignment.mode === 'unaligned') return pt;
 
   const currAnchor =
@@ -217,18 +239,19 @@ function projectCurrentPointToBaseline(
           }
         : { x: 0.5, y: 0.5 };
 
-  const dx = (pt.x - currAnchor.x) * alignment.scaleFactor;
-  const dy = (pt.y - currAnchor.y) * alignment.scaleFactor;
+  const aspect = uprightAspectRatio(current);
+  const dxIso = (pt.x - currAnchor.x) * aspect * alignment.scaleFactor;
+  const dyIso = (pt.y - currAnchor.y) * alignment.scaleFactor;
   const rad = (alignment.rotationDeltaDeg * Math.PI) / 180;
   const cos = Math.cos(rad);
   const sin = Math.sin(rad);
 
-  const rx = dx * cos - dy * sin;
-  const ry = dx * sin + dy * cos;
+  const rxIso = dxIso * cos - dyIso * sin;
+  const ryIso = dxIso * sin + dyIso * cos;
 
   return {
-    x: currAnchor.x + rx + alignment.translateXPct / 100,
-    y: currAnchor.y + ry + alignment.translateYPct / 100,
+    x: currAnchor.x + rxIso / aspect + alignment.translateXPct / 100,
+    y: currAnchor.y + ryIso + alignment.translateYPct / 100,
   };
 }
 
@@ -351,8 +374,8 @@ export function compareBlemishAnalyses(
         lesion: l,
         alignedCenter: projectCurrentPointToBaseline(
           l.centerNormalized,
-          baseline,
-          current
+          current,
+          alignment
         ),
       }));
 

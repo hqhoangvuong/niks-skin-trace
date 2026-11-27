@@ -327,8 +327,8 @@ export class TrueDepthCameraWeb
       ...existing[idx],
       blemishAnalysis: options.analysis,
     };
-    this.writeStoredSessions(existing);
-    return { saved: true };
+    const saved = this.writeStoredSessions(existing);
+    return { saved };
   }
 
   async runCoreMLBlemishAnalysis(
@@ -412,12 +412,13 @@ export class TrueDepthCameraWeb
     }
   }
 
-  private writeStoredSessions(sessions: NativeCaptureRecord[]): void {
-    if (typeof localStorage === 'undefined') return;
+  private writeStoredSessions(sessions: NativeCaptureRecord[]): boolean {
+    if (typeof localStorage === 'undefined') return false;
     try {
       localStorage.setItem(WEB_STORAGE_KEY, JSON.stringify(sessions));
+      return true;
     } catch {
-      // Ignore quota errors in web fallback
+      return false;
     }
   }
 }

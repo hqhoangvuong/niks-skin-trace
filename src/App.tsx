@@ -298,7 +298,7 @@ function CaptureLab() {
     <main className="app-shell">
       <header className="header">
         <div className="header-row">
-          <h1>Skin Trace — Capture Lab (M0/M1)</h1>
+          <h1>Skin Trace — Capture &amp; Blemish Lab</h1>
           <div className="badge-row">
             <span className={`badge ${isNative ? 'ok' : 'warn'}`}>
               Runtime: {platform}
@@ -314,7 +314,20 @@ function CaptureLab() {
             >
               Camera: {permission}
             </span>
-            <span className="badge">AI Analysis: not_analyzed</span>
+            {(() => {
+              const measuredCount = sessions.filter(
+                (s) => s.analysis.state === 'measured'
+              ).length;
+              return (
+                <span
+                  className={`badge ${measuredCount > 0 ? 'ok' : ''}`}
+                >
+                  {measuredCount > 0
+                    ? `Analyzed: ${measuredCount}/${sessions.length}`
+                    : 'Analysis: not_analyzed'}
+                </span>
+              );
+            })()}
           </div>
         </div>
         <p className="subtitle">
