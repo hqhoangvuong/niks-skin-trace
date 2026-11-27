@@ -367,6 +367,9 @@ export interface TrueDepthCameraPlugin {
   runCoreMLBlemishAnalysis(
     options: RunCoreMLBlemishAnalysisOptions
   ): Promise<BlemishAnalysisRecord>;
+  runColorimetryAnalysis(
+    options: RunColorimetryAnalysisOptions
+  ): Promise<ColorimetryAnalysisRecord>;
   addListener(
     eventName: 'guidanceUpdate',
     listenerFunc: (snapshot: LiveGuidanceSnapshot) => void

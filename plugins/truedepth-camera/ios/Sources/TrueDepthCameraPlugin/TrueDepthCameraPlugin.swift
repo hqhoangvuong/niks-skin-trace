@@ -15,7 +15,8 @@ public class TrueDepthCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "listLocalSessions", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "deleteLocalSession", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "saveSessionAnalysis", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "runCoreMLBlemishAnalysis", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "runCoreMLBlemishAnalysis", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "runColorimetryAnalysis", returnType: CAPPluginReturnPromise)
     ]
 
     private let captureManager = TrueDepthCaptureManager()
@@ -169,6 +170,17 @@ public class TrueDepthCameraPlugin: CAPPlugin, CAPBridgedPlugin {
                 confidenceThreshold: confidenceThreshold,
                 uncertainThreshold: uncertainThreshold
             )
+            call.resolve(record)
+        }
+    }
+
+    @objc public func runColorimetryAnalysis(_ call: CAPPluginCall) {
+        guard let sessionId = call.getString("sessionId") else {
+            call.reject("Missing required parameter: sessionId")
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let record = TrueDepthColorimetryAnalyzer.analyze(sessionId: sessionId)
             call.resolve(record)
         }
     }

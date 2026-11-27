@@ -4,6 +4,7 @@ import {
   type BlemishAnalysisRecord,
   type CameraPermissionState,
   type CapturePairedPhotoOptions,
+  type ColorimetryAnalysisRecord,
   type DeviceCapabilityReport,
   type LiveGuidanceSnapshot,
   type NativeCaptureRecord,
@@ -90,5 +91,11 @@ export const cameraBridge = {
     options: RunCoreMLBlemishAnalysisOptions
   ): Promise<BlemishAnalysisRecord> {
     return TrueDepthCamera.runCoreMLBlemishAnalysis(options);
+  },
+
+  async runColorimetryAnalysis(
+    sessionId: string
+  ): Promise<ColorimetryAnalysisRecord> {
+    return TrueDepthCamera.runColorimetryAnalysis({ sessionId });
   },
 };

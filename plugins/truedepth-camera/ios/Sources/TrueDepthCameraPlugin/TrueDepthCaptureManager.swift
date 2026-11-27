@@ -368,6 +368,11 @@ final class TrueDepthCaptureManager: NSObject {
                let analysisJson = try? JSONSerialization.jsonObject(with: analysisData) as? [String: Any] {
                 json["blemishAnalysis"] = analysisJson
             }
+            let colorimetryURL = dir.appendingPathComponent("colorimetry.json")
+            if let colorData = try? Data(contentsOf: colorimetryURL),
+               let colorJson = try? JSONSerialization.jsonObject(with: colorData) as? [String: Any] {
+                json["colorimetryAnalysis"] = colorJson
+            }
             results.append(json)
         }
 
@@ -397,6 +402,19 @@ final class TrueDepthCaptureManager: NSObject {
         let data = try JSONSerialization.data(withJSONObject: analysis, options: [.prettyPrinted, .sortedKeys])
         let analysisURL = sessionDir.appendingPathComponent("analysis.json")
         try data.write(to: analysisURL, options: [.atomic, .completeFileProtection])
+        return true
+    }
+
+    static func saveSessionColorimetry(sessionId: String, colorimetry: [String: Any]) throws -> Bool {
+        guard UUID(uuidString: sessionId) != nil else { return false }
+        guard JSONSerialization.isValidJSONObject(colorimetry) else {
+            throw TrueDepthCaptureError.persistenceFailed("Colorimetry payload contains non-JSON-serializable values.")
+        }
+        let sessionDir = sessionsRootURL.appendingPathComponent(sessionId, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: sessionDir.path) else { return false }
+        let data = try JSONSerialization.data(withJSONObject: colorimetry, options: [.prettyPrinted, .sortedKeys])
+        let colorURL = sessionDir.appendingPathComponent("colorimetry.json")
+        try data.write(to: colorURL, options: [.atomic, .completeFileProtection])
         return true
     }
 

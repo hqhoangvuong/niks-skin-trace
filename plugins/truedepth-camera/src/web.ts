@@ -3,11 +3,13 @@ import type {
   BlemishAnalysisRecord,
   CameraPermissionState,
   CapturePairedPhotoOptions,
+  ColorimetryAnalysisRecord,
   DeviceCapabilityReport,
   LiveGuidanceSnapshot,
   NativeCaptureRecord,
   OpenGuidedCaptureOptions,
   OpenGuidedCaptureResult,
+  RunColorimetryAnalysisOptions,
   RunCoreMLBlemishAnalysisOptions,
   SaveSessionAnalysisOptions,
   TrueDepthCameraPlugin,
@@ -349,6 +351,24 @@ export class TrueDepthCameraWeb
       lesions: [],
       regions: [],
       warnings: ['Core ML is unavailable in web browser fallback mode.'],
+    };
+  }
+
+  async runColorimetryAnalysis(
+    options: RunColorimetryAnalysisOptions
+  ): Promise<ColorimetryAnalysisRecord> {
+    return {
+      sessionId: options.sessionId,
+      analyzedAtIso: new Date().toISOString(),
+      state: 'unavailable',
+      unavailableReason:
+        'Full-resolution sRGB CIELAB facial ROI colorimetry requires native iOS execution with Vision facial landmarks.',
+      algorithmVersion: 'cielab-roi-srgb-v1',
+      metricDefinitionVersion: 'colorimetry-metrics-v1',
+      colorSpace: 'sRGB_D65',
+      computationTimeMs: 0,
+      regions: [],
+      warnings: ['Colorimetry is unavailable in web browser fallback mode.'],
     };
   }
 

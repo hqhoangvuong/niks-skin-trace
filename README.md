@@ -38,6 +38,7 @@ skin-trace/
 │           ├── TrueDepthCameraPlugin.swift
 │           ├── TrueDepthDeviceInspector.swift
 │           ├── TrueDepthCaptureManager.swift
+│           ├── TrueDepthColorimetryAnalyzer.swift
 │           ├── TrueDepthGuidanceEvaluator.swift
 │           ├── TrueDepthLandmarkAligner.swift
 │           └── TrueDepthLiveCameraViewController.swift
