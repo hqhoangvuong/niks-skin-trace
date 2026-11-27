@@ -225,6 +225,36 @@ function classifyDirection(
   return signal < 0 ? 'decreased_appearance' : 'increased_appearance';
 }
 
+function classifyDarkSpotDirection(
+  baseAreaFrac: number | null,
+  currAreaFrac: number | null,
+  deltaSpotContrastL: number | null
+): AppearanceChangeDirection {
+  if (!isFiniteNum(baseAreaFrac) || !isFiniteNum(currAreaFrac)) {
+    return 'unavailable';
+  }
+  const deltaSpotFrac = currAreaFrac - baseAreaFrac;
+  // Continuous area-fraction change drives direction above noise floor (prevents survivorship bias).
+  if (Math.abs(deltaSpotFrac) >= NOISE_AREA_FRACTION_DELTA) {
+    return deltaSpotFrac < 0 ? 'decreased_appearance' : 'increased_appearance';
+  }
+  // Only inspect contrast DeltaL when both captures have above-noise spot coverage
+  // (avoids the 0 -> 1 pixel step jump from 0.0 to >= 6.0 L*).
+  const bothHaveSpots =
+    baseAreaFrac >= NOISE_AREA_FRACTION_DELTA &&
+    currAreaFrac >= NOISE_AREA_FRACTION_DELTA;
+  if (
+    bothHaveSpots &&
+    isFiniteNum(deltaSpotContrastL) &&
+    Math.abs(deltaSpotContrastL) >= 1.2
+  ) {
+    return deltaSpotContrastL < 0
+      ? 'decreased_appearance'
+      : 'increased_appearance';
+  }
+  return 'no_clear_change';
+}
+
 function isFiniteNum(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v);
 }
@@ -237,17 +267,31 @@ export function compareColorimetryAnalyses(
   const baseCol = baseline.colorimetryAnalysis;
   const currCol = current.colorimetryAnalysis;
 
-  if (
-    !baseCol ||
-    !currCol ||
-    baseCol.state !== 'measured' ||
-    currCol.state !== 'measured'
-  ) {
+  if (!baseCol || !currCol) {
     return {
       state: 'not_analyzed',
       reasons: [
         'Run Redness & Spots (CIELAB) analysis on both Baseline and Current sessions to compare appearance proxies.',
       ],
+      regionDeltas: [],
+    };
+  }
+
+  if (baseCol.state === 'unavailable' || currCol.state === 'unavailable') {
+    const reasons: string[] = [];
+    if (baseCol.state === 'unavailable') {
+      reasons.push(
+        `Baseline colorimetry unavailable: ${baseCol.unavailableReason ?? 'insufficient valid skin or missing ROI data.'}`
+      );
+    }
+    if (currCol.state === 'unavailable') {
+      reasons.push(
+        `Current colorimetry unavailable: ${currCol.unavailableReason ?? 'insufficient valid skin or missing ROI data.'}`
+      );
+    }
+    return {
+      state: 'unavailable',
+      reasons,
       regionDeltas: [],
     };
   }
@@ -274,8 +318,13 @@ export function compareColorimetryAnalyses(
     );
   }
 
+  // Require exposure EV & white-balance metadata to verify color consistency.
   const dEv = comparability.deltas.exposureEvDelta;
-  if (isFiniteNum(dEv) && Math.abs(dEv) > MAX_COLOR_EV_DELTA) {
+  if (!isFiniteNum(dEv)) {
+    blockers.push(
+      'Exposure metadata missing on one or both sessions — lighting consistency cannot be verified for colorimetry.'
+    );
+  } else if (Math.abs(dEv) > MAX_COLOR_EV_DELTA) {
     blockers.push(
       `Exposure shifted by ${Math.abs(dEv).toFixed(2)} EV stops (color comparison limit ≤ ${MAX_COLOR_EV_DELTA} EV).`
     );
@@ -283,19 +332,38 @@ export function compareColorimetryAnalyses(
 
   const dWbR = comparability.deltas.wbRedDelta;
   const dWbB = comparability.deltas.wbBlueDelta;
-  if (
-    (isFiniteNum(dWbR) && Math.abs(dWbR) > MAX_COLOR_WB_DELTA) ||
-    (isFiniteNum(dWbB) && Math.abs(dWbB) > MAX_COLOR_WB_DELTA)
+  if (!isFiniteNum(dWbR) || !isFiniteNum(dWbB)) {
+    blockers.push(
+      'White-balance gain metadata missing on one or both sessions — color temperature consistency cannot be verified.'
+    );
+  } else if (
+    Math.abs(dWbR) > MAX_COLOR_WB_DELTA ||
+    Math.abs(dWbB) > MAX_COLOR_WB_DELTA
   ) {
     blockers.push(
-      `White balance shifted beyond color limit ≤ ${MAX_COLOR_WB_DELTA} (ΔR ${isFiniteNum(dWbR) ? dWbR.toFixed(2) : '—'}, ΔB ${isFiniteNum(dWbB) ? dWbB.toFixed(2) : '—'}).`
+      `White balance shifted beyond color limit ≤ ${MAX_COLOR_WB_DELTA} (ΔR ${dWbR.toFixed(2)}, ΔB ${dWbB.toFixed(2)}).`
     );
   }
 
   const dDist = comparability.deltas.distanceDeltaCm;
-  if (isFiniteNum(dDist) && Math.abs(dDist) > MAX_COLOR_DISTANCE_DELTA_CM) {
+  const dScale = comparability.deltas.scaleDeltaPct;
+  let geometryNote = 'distance';
+  if (isFiniteNum(dDist)) {
+    if (Math.abs(dDist) > MAX_COLOR_DISTANCE_DELTA_CM) {
+      blockers.push(
+        `Camera distance shifted by ${Math.abs(dDist).toFixed(1)} cm (color limit ≤ ${MAX_COLOR_DISTANCE_DELTA_CM} cm).`
+      );
+    }
+  } else if (isFiniteNum(dScale)) {
+    geometryNote = 'scale';
+    if (Math.abs(dScale) > 12) {
+      blockers.push(
+        `Image scale shifted by ${Math.abs(dScale).toFixed(1)}% (color limit ≤ 12% when depth distance unavailable).`
+      );
+    }
+  } else {
     blockers.push(
-      `Camera distance shifted by ${Math.abs(dDist).toFixed(1)} cm (color limit ≤ ${MAX_COLOR_DISTANCE_DELTA_CM} cm).`
+      'Camera distance and scale deltas unavailable — stand-off geometry cannot be verified for colorimetry.'
     );
   }
 
@@ -365,20 +433,30 @@ export function compareColorimetryAnalyses(
           deltaRedFrac,
           NOISE_AREA_FRACTION_DELTA
         ),
-        darkSpotStatus: classifyDirection(
-          deltaSpotFrac,
-          NOISE_AREA_FRACTION_DELTA,
-          deltaSpotContrastL,
-          1.2
+        darkSpotStatus: classifyDarkSpotDirection(
+          b.darkSpotContrastAreaFraction,
+          c.darkSpotContrastAreaFraction,
+          deltaSpotContrastL
         ),
       };
     }
   );
 
+  const hasAnyMeasuredRegion = regionDeltas.some((r) => r.state === 'measured');
+  if (!hasAnyMeasuredRegion) {
+    return {
+      state: 'unavailable',
+      reasons: [
+        'No shared facial ROI had sufficient valid skin pixels in both sessions.',
+      ],
+      regionDeltas,
+    };
+  }
+
   return {
     state: 'measured',
     reasons: [
-      `Compared compatible sRGB CIELAB appearance proxies (${currCol.algorithmVersion}) within strict lighting/WB/distance bounds.`,
+      `Compared compatible sRGB CIELAB appearance proxies (${currCol.algorithmVersion}) within strict lighting, WB, and ${geometryNote} bounds.`,
     ],
     regionDeltas,
   };

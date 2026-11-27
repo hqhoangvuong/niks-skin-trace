@@ -248,6 +248,7 @@ export function BlemishInspector({
         capture.sessionId
       );
       if (result.state === 'unavailable') {
+        setColorimetry(result);
         setStatusMsg(
           result.unavailableReason ??
             'Redness & Spots (CIELAB) analysis is unavailable for this session.'
@@ -561,12 +562,18 @@ export function BlemishInspector({
 
       <div style={{ marginTop: 16 }}>
         <h2>Redness &amp; Dark-Spot Appearance (CIELAB)</h2>
-        {colorimetry?.state !== 'measured' ? (
+        {!colorimetry ? (
           <p className="subtitle">
             Not analyzed yet — tap{' '}
             <strong>Run Redness &amp; Spots (CIELAB)</strong> to compute
             deterministic sRGB optical proxies per facial ROI.
           </p>
+        ) : colorimetry.state === 'unavailable' ? (
+          <div className="gate-box warn" role="note">
+            <strong>Unavailable:</strong>{' '}
+            {colorimetry.unavailableReason ??
+              'Redness & Spots (CIELAB) analysis could not be computed for this session.'}
+          </div>
         ) : (
           <>
             <table className="region-table">

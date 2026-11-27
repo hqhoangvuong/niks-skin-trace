@@ -271,4 +271,115 @@ describe('colorimetryMetrics', () => {
       'not_comparable'
     );
   });
+
+  it('refuses colorimetry comparison when EV or white-balance deltas are missing', () => {
+    const b = makeCapture('b', {
+      cameraMetadata: undefined,
+      colorimetryAnalysis: makeColorimetryRecord('b'),
+    });
+    const c = makeCapture('c', {
+      colorimetryAnalysis: makeColorimetryRecord('c'),
+    });
+    const gateNoCameraMeta = makeGate('b', 'c', {
+      deltas: { distanceDeltaCm: 0.5 },
+    });
+    const res = compareColorimetryAnalyses(b, c, gateNoCameraMeta);
+    assert.equal(res.state, 'not_comparable');
+    assert.equal(res.regionDeltas.length, 0);
+  });
+
+  it('avoids darkSpotContrastDeltaL discontinuity at 0->tiny spots and survivorship suppression on clearing', () => {
+    // 0% -> 0.2% tiny fluctuation (below 1.5% noise floor) must remain no_clear_change even if deltaL jumps 0 -> 6.5
+    const bZero = makeCapture('bz', {
+      colorimetryAnalysis: makeColorimetryRecord('bz', {
+        regions: [
+          makeRegionMetric('forehead', {
+            darkSpotContrastAreaFraction: 0,
+            darkSpotContrastDeltaL: 0,
+          }),
+          makeRegionMetric('anatomicalLeftCheek', {
+            darkSpotContrastAreaFraction: 0.1,
+            darkSpotContrastDeltaL: 7.5,
+          }),
+          makeRegionMetric('anatomicalRightCheek'),
+          makeRegionMetric('chin'),
+        ],
+      }),
+    });
+    const cTinyAndCleared = makeCapture('ct', {
+      colorimetryAnalysis: makeColorimetryRecord('ct', {
+        regions: [
+          makeRegionMetric('forehead', {
+            darkSpotContrastAreaFraction: 0.002,
+            darkSpotContrastDeltaL: 6.5,
+          }),
+          // Left cheek spots dropped 10% -> 2% (-8pp), while remaining spot has higher mean deltaL (9.5)
+          makeRegionMetric('anatomicalLeftCheek', {
+            darkSpotContrastAreaFraction: 0.02,
+            darkSpotContrastDeltaL: 9.5,
+          }),
+          makeRegionMetric('anatomicalRightCheek'),
+          makeRegionMetric('chin'),
+        ],
+      }),
+    });
+
+    const res = compareColorimetryAnalyses(
+      bZero,
+      cTinyAndCleared,
+      makeGate('bz', 'ct')
+    );
+    assert.equal(res.state, 'measured');
+    const fh = res.regionDeltas.find((r) => r.region === 'forehead');
+    assert.equal(fh?.darkSpotStatus, 'no_clear_change');
+    const lc = res.regionDeltas.find((r) => r.region === 'anatomicalLeftCheek');
+    assert.equal(lc?.darkSpotStatus, 'decreased_appearance');
+  });
+
+  it('preserves unavailable state instead of collapsing into not_analyzed or measured', () => {
+    const unavail = makeCapture('u1', {
+      colorimetryAnalysis: makeColorimetryRecord('u1', {
+        state: 'unavailable',
+        unavailableReason: 'All ROIs had glare.',
+        regions: [],
+      }),
+    });
+    const measured = makeCapture('m1', {
+      colorimetryAnalysis: makeColorimetryRecord('m1'),
+    });
+    const res1 = compareColorimetryAnalyses(
+      unavail,
+      measured,
+      makeGate('u1', 'm1')
+    );
+    assert.equal(res1.state, 'unavailable');
+
+    // Disjoint measured ROIs -> every region delta is unavailable -> top-level state must be unavailable
+    const onlyForehead = makeCapture('d1', {
+      colorimetryAnalysis: makeColorimetryRecord('d1', {
+        regions: [
+          makeRegionMetric('forehead', { state: 'measured' }),
+          makeRegionMetric('anatomicalLeftCheek', { state: 'unavailable' }),
+          makeRegionMetric('anatomicalRightCheek', { state: 'unavailable' }),
+          makeRegionMetric('chin', { state: 'unavailable' }),
+        ],
+      }),
+    });
+    const onlyChin = makeCapture('d2', {
+      colorimetryAnalysis: makeColorimetryRecord('d2', {
+        regions: [
+          makeRegionMetric('forehead', { state: 'unavailable' }),
+          makeRegionMetric('anatomicalLeftCheek', { state: 'unavailable' }),
+          makeRegionMetric('anatomicalRightCheek', { state: 'unavailable' }),
+          makeRegionMetric('chin', { state: 'measured' }),
+        ],
+      }),
+    });
+    const res2 = compareColorimetryAnalyses(
+      onlyForehead,
+      onlyChin,
+      makeGate('d1', 'd2')
+    );
+    assert.equal(res2.state, 'unavailable');
+  });
 });
