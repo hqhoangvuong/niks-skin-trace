@@ -34,6 +34,7 @@ skin-trace/
 │       ├── SkinTraceTruedepthCamera.podspec
 │       ├── src/                        # TypeScript definitions & honest web fallback
 │       └── ios/Sources/TrueDepthCameraPlugin/
+│           ├── TrueDepthBlemishAnalyzer.swift
 │           ├── TrueDepthCameraPlugin.swift
 │           ├── TrueDepthDeviceInspector.swift
 │           ├── TrueDepthCaptureManager.swift

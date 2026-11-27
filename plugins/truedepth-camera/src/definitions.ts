@@ -321,6 +321,12 @@ export interface TrueDepthCameraPlugin {
   deleteLocalSession(options: {
     sessionId: string;
   }): Promise<{ deleted: boolean }>;
+  saveSessionAnalysis(
+    options: SaveSessionAnalysisOptions
+  ): Promise<{ saved: boolean }>;
+  runCoreMLBlemishAnalysis(
+    options: RunCoreMLBlemishAnalysisOptions
+  ): Promise<BlemishAnalysisRecord>;
   addListener(
     eventName: 'guidanceUpdate',
     listenerFunc: (snapshot: LiveGuidanceSnapshot) => void

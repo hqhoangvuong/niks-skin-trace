@@ -1,6 +1,7 @@
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import {
   TrueDepthCamera,
+  type BlemishAnalysisRecord,
   type CameraPermissionState,
   type CapturePairedPhotoOptions,
   type DeviceCapabilityReport,
@@ -8,6 +9,7 @@ import {
   type NativeCaptureRecord,
   type OpenGuidedCaptureOptions,
   type OpenGuidedCaptureResult,
+  type RunCoreMLBlemishAnalysisOptions,
 } from '@skin-trace/truedepth-camera';
 
 export function resolvePreviewSrc(uri?: string): string | undefined {
@@ -71,5 +73,22 @@ export const cameraBridge = {
   async deleteLocalSession(sessionId: string): Promise<boolean> {
     const res = await TrueDepthCamera.deleteLocalSession({ sessionId });
     return res.deleted;
+  },
+
+  async saveSessionAnalysis(
+    sessionId: string,
+    analysis: BlemishAnalysisRecord
+  ): Promise<boolean> {
+    const res = await TrueDepthCamera.saveSessionAnalysis({
+      sessionId,
+      analysis,
+    });
+    return res.saved;
+  },
+
+  async runCoreMLBlemishAnalysis(
+    options: RunCoreMLBlemishAnalysisOptions
+  ): Promise<BlemishAnalysisRecord> {
+    return TrueDepthCamera.runCoreMLBlemishAnalysis(options);
   },
 };

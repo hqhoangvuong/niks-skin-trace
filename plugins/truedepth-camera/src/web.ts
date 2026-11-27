@@ -1,5 +1,6 @@
 import { WebPlugin } from '@capacitor/core';
 import type {
+  BlemishAnalysisRecord,
   CameraPermissionState,
   CapturePairedPhotoOptions,
   DeviceCapabilityReport,
@@ -7,6 +8,8 @@ import type {
   NativeCaptureRecord,
   OpenGuidedCaptureOptions,
   OpenGuidedCaptureResult,
+  RunCoreMLBlemishAnalysisOptions,
+  SaveSessionAnalysisOptions,
   TrueDepthCameraPlugin,
 } from './definitions';
 
@@ -310,6 +313,43 @@ export class TrueDepthCameraWeb
     const deleted = filtered.length !== existing.length;
     this.writeStoredSessions(filtered);
     return { deleted };
+  }
+
+  async saveSessionAnalysis(
+    options: SaveSessionAnalysisOptions
+  ): Promise<{ saved: boolean }> {
+    const existing = this.readStoredSessions();
+    const idx = existing.findIndex((s) => s.sessionId === options.sessionId);
+    if (idx === -1) {
+      return { saved: false };
+    }
+    existing[idx] = {
+      ...existing[idx],
+      blemishAnalysis: options.analysis,
+    };
+    this.writeStoredSessions(existing);
+    return { saved: true };
+  }
+
+  async runCoreMLBlemishAnalysis(
+    options: RunCoreMLBlemishAnalysisOptions
+  ): Promise<BlemishAnalysisRecord> {
+    return {
+      sessionId: options.sessionId,
+      analyzedAtIso: new Date().toISOString(),
+      state: 'unavailable',
+      unavailableReason:
+        'On-device Core ML blemish inference requires native iOS execution on a physical iPhone. Use Manual Annotation on web.',
+      source: 'research_coreml_model',
+      licenseScope: 'non_commercial_research_only',
+      modelVersion: null,
+      preprocessingVersion: null,
+      metricDefinitionVersion: 'blemish-metrics-v1',
+      computationTimeMs: 0,
+      lesions: [],
+      regions: [],
+      warnings: ['Core ML is unavailable in web browser fallback mode.'],
+    };
   }
 
   private buildAndStoreWebRecord(params: {

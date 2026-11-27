@@ -13,7 +13,9 @@ public class TrueDepthCameraPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "capturePairedPhoto", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openGuidedCapture", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "listLocalSessions", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "deleteLocalSession", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "deleteLocalSession", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "saveSessionAnalysis", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "runCoreMLBlemishAnalysis", returnType: CAPPluginReturnPromise)
     ]
 
     private let captureManager = TrueDepthCaptureManager()
@@ -136,6 +138,38 @@ public class TrueDepthCameraPlugin: CAPPlugin, CAPBridgedPlugin {
             call.resolve(["deleted": deleted])
         } catch {
             call.reject(error.localizedDescription, nil, error)
+        }
+    }
+
+    @objc public func saveSessionAnalysis(_ call: CAPPluginCall) {
+        guard let sessionId = call.getString("sessionId"),
+              let analysis = call.getObject("analysis") else {
+            call.reject("Missing required parameters: sessionId and analysis")
+            return
+        }
+        do {
+            let saved = try TrueDepthCaptureManager.saveSessionAnalysis(sessionId: sessionId, analysis: analysis)
+            call.resolve(["saved": saved])
+        } catch {
+            call.reject(error.localizedDescription, nil, error)
+        }
+    }
+
+    @objc public func runCoreMLBlemishAnalysis(_ call: CAPPluginCall) {
+        guard let sessionId = call.getString("sessionId") else {
+            call.reject("Missing required parameter: sessionId")
+            return
+        }
+        let confidenceThreshold = call.getDouble("confidenceThreshold")
+        let uncertainThreshold = call.getDouble("uncertainThreshold")
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            let record = TrueDepthBlemishAnalyzer.analyze(
+                sessionId: sessionId,
+                confidenceThreshold: confidenceThreshold,
+                uncertainThreshold: uncertainThreshold
+            )
+            call.resolve(record)
         }
     }
 }

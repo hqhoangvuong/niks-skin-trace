@@ -360,8 +360,13 @@ final class TrueDepthCaptureManager: NSObject {
         for dir in dirs {
             let metaURL = dir.appendingPathComponent("session.json")
             guard let data = try? Data(contentsOf: metaURL),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                  var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
                 continue
+            }
+            let analysisURL = dir.appendingPathComponent("analysis.json")
+            if let analysisData = try? Data(contentsOf: analysisURL),
+               let analysisJson = try? JSONSerialization.jsonObject(with: analysisData) as? [String: Any] {
+                json["blemishAnalysis"] = analysisJson
             }
             results.append(json)
         }
@@ -379,6 +384,16 @@ final class TrueDepthCaptureManager: NSObject {
         let target = Self.sessionsRootURL.appendingPathComponent(sessionId, isDirectory: true)
         guard FileManager.default.fileExists(atPath: target.path) else { return false }
         try FileManager.default.removeItem(at: target)
+        return true
+    }
+
+    static func saveSessionAnalysis(sessionId: String, analysis: [String: Any]) throws -> Bool {
+        guard UUID(uuidString: sessionId) != nil else { return false }
+        let sessionDir = sessionsRootURL.appendingPathComponent(sessionId, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: sessionDir.path) else { return false }
+        let data = try JSONSerialization.data(withJSONObject: analysis, options: [.prettyPrinted, .sortedKeys])
+        let analysisURL = sessionDir.appendingPathComponent("analysis.json")
+        try data.write(to: analysisURL, options: [.atomic, .completeFileProtection])
         return true
     }
 
