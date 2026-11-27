@@ -137,6 +137,85 @@ export interface FacialAlignmentMetadata {
   error?: string;
 }
 
+export type LesionCategory =
+  | 'comedone'
+  | 'papule_pustule'
+  | 'nodule_cyst'
+  | 'active_blemish_unspecified'
+  | 'residual_red_mark_pie'
+  | 'residual_dark_spot_pih';
+
+export type FacialRegionId =
+  | 'forehead'
+  | 'anatomicalLeftCheek'
+  | 'anatomicalRightCheek'
+  | 'chin'
+  | 'other';
+
+export type DetectionUncertaintyState =
+  | 'confident'
+  | 'uncertain'
+  | 'user_verified'
+  | 'user_rejected';
+
+export type AnalysisSource =
+  | 'manual_annotation'
+  | 'research_coreml_model'
+  | 'validated_coreml_model';
+
+export type ModelLicenseScope =
+  | 'user_authored'
+  | 'non_commercial_research_only'
+  | 'commercial_cleared';
+
+export interface CandidateLesion {
+  id: string;
+  region: FacialRegionId;
+  category: LesionCategory;
+  centerNormalized: NormalizedPoint;
+  bboxNormalized: NormalizedRect;
+  confidence: number | null;
+  uncertaintyState: DetectionUncertaintyState;
+  source: AnalysisSource;
+  note?: string;
+}
+
+export interface RegionBlemishSummary {
+  region: FacialRegionId;
+  activeBlemishCount: number;
+  residualMarkCount: number;
+  uncertainCount: number;
+  affectedAreaNormalized: number;
+  affectedAreaMm2: number | null;
+}
+
+export interface BlemishAnalysisRecord {
+  sessionId: string;
+  analyzedAtIso: string;
+  state: 'measured' | 'unavailable';
+  unavailableReason?: string;
+  source: AnalysisSource;
+  licenseScope: ModelLicenseScope;
+  modelVersion: string | null;
+  preprocessingVersion: string | null;
+  metricDefinitionVersion: string;
+  computationTimeMs: number;
+  lesions: CandidateLesion[];
+  regions: RegionBlemishSummary[];
+  warnings: string[];
+}
+
+export interface SaveSessionAnalysisOptions {
+  sessionId: string;
+  analysis: BlemishAnalysisRecord;
+}
+
+export interface RunCoreMLBlemishAnalysisOptions {
+  sessionId: string;
+  confidenceThreshold?: number;
+  uncertainThreshold?: number;
+}
+
 /**
  * Pilot-default live guidance snapshot emitted by AVCaptureDataOutputSynchronizer
  * + Vision face landmarks. Thresholds are provisional until calibrated on hardware.
@@ -221,6 +300,7 @@ export interface NativeCaptureRecord {
   };
   cameraMetadata?: CameraExposureMetadata;
   facialAlignment?: FacialAlignmentMetadata;
+  blemishAnalysis?: BlemishAnalysisRecord;
   depth: DepthStats;
   liveGuidanceAtShutter?: LiveGuidanceSnapshot;
   captureDurationMs: number;

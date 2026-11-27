@@ -1,4 +1,5 @@
 import type {
+  BlemishAnalysisRecord,
   CaptureView,
   NativeCaptureRecord,
 } from '@skin-trace/truedepth-camera';
@@ -71,8 +72,13 @@ export function buildM0SessionEnvelope(
   const shutterGuidance = capture.liveGuidanceAtShutter;
   const rejectionReasons: string[] = [];
   if (shutterGuidance && !shutterGuidance.readyToCapture) {
-    rejectionReasons.push(...shutterGuidance.guidanceMessages);
+    rejectionReasons.push(...(shutterGuidance.guidanceMessages ?? []));
   }
+
+  const blemish: BlemishAnalysisRecord | undefined = capture.blemishAnalysis;
+  const blemishState: MetricAvailabilityState = blemish
+    ? blemish.state
+    : 'not_analyzed';
 
   return {
     capture,
@@ -86,22 +92,26 @@ export function buildM0SessionEnvelope(
           ? 'accepted'
           : 'rejected'
         : 'not_evaluated',
-      depthValid: capture.depth.available
+      depthValid: capture.depth?.available
         ? (capture.depth.validPixelRatio ?? 0) >= 0.5
         : null,
       rejectionReasons,
     },
     analysis: {
       sessionId: capture.sessionId,
-      modelVersion: null,
-      preprocessingVersion: null,
-      metricDefinitionVersion: null,
-      state: 'not_analyzed',
+      modelVersion: blemish?.modelVersion ?? null,
+      preprocessingVersion: blemish?.preprocessingVersion ?? null,
+      metricDefinitionVersion: blemish?.metricDefinitionVersion ?? null,
+      state: blemishState,
       concerns: [
         {
           concern: 'acne_blemishes',
-          state: 'not_analyzed',
-          reason: 'No validated blemish model integrated in Milestone M0.',
+          state: blemishState,
+          reason:
+            blemish?.unavailableReason ??
+            (blemish
+              ? `Source: ${blemish.source} (${blemish.licenseScope})`
+              : 'No blemish annotation or model analysis run yet.'),
         },
         {
           concern: 'dark_spots',
@@ -114,7 +124,9 @@ export function buildM0SessionEnvelope(
           reason: 'Staged for Milestone M3.',
         },
       ],
-      note: 'M0 records capture hardware behavior and local files only; detections are never fabricated.',
+      note: blemish
+        ? `Persisted ${blemish.source} record (${blemish.modelVersion ?? 'unversioned'}).`
+        : 'Capture recorded locally; blemish analysis has not been run.',
     },
   };
 }
