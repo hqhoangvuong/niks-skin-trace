@@ -472,3 +472,116 @@ pre.json-box {
   font-size: 0.78rem;
   text-transform: capitalize;
 }
+
+.research-banner {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: rgba(240, 180, 41, 0.16);
+  border: 1px solid var(--warn);
+  color: #fde3a7;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.inspector-canvas-wrap {
+  margin-top: 12px;
+}
+
+.inspector-canvas {
+  position: relative;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #050709;
+}
+
+.inspector-canvas.pin-cursor {
+  cursor: crosshair;
+}
+
+.inspector-img {
+  width: 100%;
+  height: auto;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+}
+
+.lesion-pin {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.75);
+}
+
+.lesion-pin.active {
+  background: rgba(241, 106, 106, 0.85);
+}
+
+.lesion-pin.residual {
+  background: rgba(240, 180, 41, 0.85);
+}
+
+.lesion-pin.uncertain {
+  border-style: dashed;
+  opacity: 0.75;
+}
+
+.lesion-pin.rejected {
+  background: rgba(130, 140, 155, 0.55);
+  opacity: 0.45;
+}
+
+.lesion-pin.selected {
+  width: 22px;
+  height: 22px;
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+.tracked-pin {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  border: 2px solid #fff;
+}
+
+.tracked-pin.persisting {
+  background: rgba(79, 163, 255, 0.88);
+}
+
+.tracked-pin.candidate_new {
+  background: rgba(241, 106, 106, 0.9);
+}
+
+.tracked-pin.no_longer_detected {
+  background: transparent;
+  border: 2px dashed var(--ok);
+}
+
+.region-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.84rem;
+}
+
+.region-table th,
+.region-table td {
+  text-align: left;
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.region-table th {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}

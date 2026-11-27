@@ -6,6 +6,10 @@ import type {
 } from '@skin-trace/truedepth-camera';
 import { resolvePreviewSrc } from '../services/cameraBridge';
 import { computePairAlignmentTransform } from '../services/alignment';
+import {
+  compareBlemishAnalyses,
+  type TrackedLesionMatch,
+} from '../services/blemishMetrics';
 import { evaluateComparability } from '../services/comparison';
 import type { SessionEnvelope } from '../types/domain';
 
@@ -72,6 +76,7 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
   const [splitPct, setSplitPct] = useState(50);
   const [autoAlign, setAutoAlign] = useState(true);
   const [showRois, setShowRois] = useState(true);
+  const [showTrackedLesions, setShowTrackedLesions] = useState(true);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const dragRef = useRef<{
@@ -172,6 +177,11 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
     if (!baseline || !current) return null;
     return evaluateComparability(baseline, current);
   }, [baseline, current]);
+
+  const blemishComparison = useMemo(() => {
+    if (!baseline || !current || !comparison) return null;
+    return compareBlemishAnalyses(baseline, current, comparison);
+  }, [baseline, current, comparison]);
 
   const timelineGroups = useMemo(() => {
     const map = new Map<string, SessionEnvelope[]>();
@@ -280,7 +290,8 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                     Alignment: {comparison.alignmentMode}
                   </span>
                   <span className="badge">
-                    Change Verdict: {comparison.analysisStatus} (M2)
+                    Change Verdict:{' '}
+                    {blemishComparison?.state ?? comparison.analysisStatus}
                   </span>
                 </div>
 
@@ -334,6 +345,105 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
               </div>
             )}
 
+            {blemishComparison && (
+              <div
+                className={`gate-box ${
+                  blemishComparison.state === 'measured'
+                    ? 'ok'
+                    : blemishComparison.state === 'not_comparable'
+                      ? 'danger'
+                      : 'warn'
+                }`}
+              >
+                <div className="badge-row">
+                  <span
+                    className={`badge ${
+                      blemishComparison.state === 'measured'
+                        ? 'ok'
+                        : blemishComparison.state === 'not_comparable'
+                          ? 'danger'
+                          : 'warn'
+                    }`}
+                  >
+                    Blemish Comparison: {blemishComparison.state}
+                  </span>
+                  {blemishComparison.spatialMatchingAvailable && (
+                    <span className="badge">
+                      Spatial Tracking:{' '}
+                      {
+                        blemishComparison.trackedLesions.filter(
+                          (t) => t.status === 'persisting'
+                        ).length
+                      }{' '}
+                      persisting ·{' '}
+                      {
+                        blemishComparison.trackedLesions.filter(
+                          (t) => t.status === 'candidate_new'
+                        ).length
+                      }{' '}
+                      new ·{' '}
+                      {
+                        blemishComparison.trackedLesions.filter(
+                          (t) => t.status === 'no_longer_detected'
+                        ).length
+                      }{' '}
+                      not detected
+                    </span>
+                  )}
+                </div>
+
+                <ul className="note-list">
+                  {blemishComparison.reasons.map((reason, idx) => (
+                    <li key={idx}>{reason}</li>
+                  ))}
+                </ul>
+
+                {blemishComparison.state === 'measured' && (
+                  <>
+                    <table className="region-table" style={{ marginTop: 10 }}>
+                      <thead>
+                        <tr>
+                          <th>Region</th>
+                          <th>Active (Δ)</th>
+                          <th>Residual (Δ)</th>
+                          <th>Area Δ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {blemishComparison.regionDeltas.map((row) => (
+                          <tr key={row.region}>
+                            <td>{row.region}</td>
+                            <td>
+                              {row.baselineActiveCount} →{' '}
+                              {row.currentActiveCount} (
+                              {row.activeDelta >= 0 ? '+' : ''}
+                              {row.activeDelta})
+                            </td>
+                            <td>
+                              {row.baselineResidualCount} →{' '}
+                              {row.currentResidualCount} (
+                              {row.residualDelta >= 0 ? '+' : ''}
+                              {row.residualDelta})
+                            </td>
+                            <td>
+                              {row.areaDeltaMm2 !== null
+                                ? `${row.areaDeltaMm2 >= 0 ? '+' : ''}${row.areaDeltaMm2.toFixed(1)} mm²`
+                                : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="subtitle" style={{ marginTop: 8 }}>
+                      Visible count differences reflect annotated/detected
+                      regions only and do not establish product causation. A
+                      no-longer-detected lesion is not proof of healing.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+
             <div className="controls">
               <button
                 type="button"
@@ -359,6 +469,15 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
               <button type="button" onClick={() => setShowRois((v) => !v)}>
                 ROIs: {showRois ? 'On' : 'Off'}
               </button>
+              {blemishComparison?.spatialMatchingAvailable &&
+                blemishComparison.trackedLesions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowTrackedLesions((v) => !v)}
+                  >
+                    Tracked Pins: {showTrackedLesions ? 'On' : 'Off'}
+                  </button>
+                )}
               <select
                 aria-label="Zoom level"
                 value={zoom}
@@ -416,7 +535,9 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                         />
                       </div>
                     </div>
-                    {showRois && (
+                    {(showRois ||
+                      (showTrackedLesions &&
+                        blemishComparison?.spatialMatchingAvailable)) && (
                       <div
                         className="compare-zoom-layer"
                         style={{
@@ -425,7 +546,24 @@ export function BeforeAfterViewer({ sessions }: BeforeAfterViewerProps) {
                         }}
                       >
                         <div className="roi-overlay">
-                          {renderRegionBoxes(baseline?.facialAlignment?.regions)}
+                          {showRois &&
+                            renderRegionBoxes(
+                              baseline?.facialAlignment?.regions
+                            )}
+                          {showTrackedLesions &&
+                            blemishComparison?.spatialMatchingAvailable &&
+                            blemishComparison.trackedLesions.map(
+                              (t: TrackedLesionMatch) => (
+                                <div
+                                  key={t.id}
+                                  className={`tracked-pin ${t.status}`}
+                                  style={{
+                                    left: `${t.alignedCenterNormalized.x * 100}%`,
+                                    top: `${t.alignedCenterNormalized.y * 100}%`,
+                                  }}
+                                />
+                              )
+                            )}
                         </div>
                       </div>
                     )}

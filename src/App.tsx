@@ -1,5 +1,6 @@
 import { Component, type ReactNode, useEffect, useMemo, useState } from 'react';
 import type {
+  BlemishAnalysisRecord,
   CameraPermissionState,
   CaptureView,
   DeviceCapabilityReport,
@@ -8,6 +9,7 @@ import type {
 } from '@skin-trace/truedepth-camera';
 import { cameraBridge, resolvePreviewSrc } from './services/cameraBridge';
 import { BeforeAfterViewer } from './components/BeforeAfterViewer';
+import { BlemishInspector } from './components/BlemishInspector';
 import {
   buildM0SessionEnvelope,
   type SessionEnvelope,
@@ -96,6 +98,31 @@ function CaptureLab() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedReport, setCopiedReport] = useState(false);
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
+  const [inspectedSessionId, setInspectedSessionId] = useState<string | null>(
+    null
+  );
+
+  const inspectedSession = useMemo(
+    () =>
+      sessions.find((s) => s.capture.sessionId === inspectedSessionId) ?? null,
+    [sessions, inspectedSessionId]
+  );
+
+  function handleAnalysisSaved(
+    sessionId: string,
+    analysisRecord: BlemishAnalysisRecord
+  ) {
+    setSessions((prev) =>
+      prev.map((item) =>
+        item.capture.sessionId === sessionId
+          ? buildM0SessionEnvelope({
+              ...item.capture,
+              blemishAnalysis: analysisRecord,
+            })
+          : item
+      )
+    );
+  }
 
   const platform = cameraBridge.getPlatform();
   const isNative = cameraBridge.isNativePlatform();
@@ -322,6 +349,12 @@ function CaptureLab() {
 
       {activeTab === 'compare' ? (
         <BeforeAfterViewer sessions={sessions} />
+      ) : inspectedSession ? (
+        <BlemishInspector
+          session={inspectedSession}
+          onAnalysisSaved={handleAnalysisSaved}
+          onClose={() => setInspectedSessionId(null)}
+        />
       ) : (
         <>
           <section className="card">
@@ -576,8 +609,15 @@ function CaptureLab() {
                         >
                           Quality: {quality.acceptanceState}
                         </span>
-                        <span className="badge">
+                        <span
+                          className={`badge ${
+                            analysis.state === 'measured' ? 'ok' : ''
+                          }`}
+                        >
                           Analysis: {analysis.state}
+                          {capture.blemishAnalysis?.state === 'measured'
+                            ? ` (${capture.blemishAnalysis.regions.reduce((sum, r) => sum + r.activeBlemishCount, 0)} active / ${capture.blemishAnalysis.regions.reduce((sum, r) => sum + r.residualMarkCount, 0)} residual)`
+                            : ''}
                         </span>
                       </div>
                       <p className="subtitle" style={{ marginTop: 6 }}>
@@ -587,6 +627,13 @@ function CaptureLab() {
                       </p>
                     </div>
                     <div className="controls" style={{ marginTop: 0 }}>
+                      <button
+                        type="button"
+                        className="primary"
+                        onClick={() => setInspectedSessionId(capture.sessionId)}
+                      >
+                        Inspect / Annotate
+                      </button>
                       <button
                         type="button"
                         onClick={() =>
