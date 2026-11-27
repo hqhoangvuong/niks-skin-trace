@@ -1,0 +1,110 @@
+{
+  "cameraDeviceType" : "AVCaptureDeviceTypeBuiltInTrueDepthCamera",
+  "cameraMetadata" : {
+    "exposureDurationMs" : 32.950000000000003,
+    "exposureTargetBias" : 0,
+    "iso" : 923.5384521484375,
+    "whiteBalanceBlueGain" : 1.671142578125,
+    "whiteBalanceGreenGain" : 1,
+    "whiteBalanceRedGain" : 2.143798828125
+  },
+  "capturedAtIso" : "2026-11-27T05:23:26Z",
+  "captureDurationMs" : 326,
+  "depth" : {
+    "accuracy" : "absolute",
+    "available" : true,
+    "calibration" : {
+      "hasInverseLensDistortionLookupTable" : true,
+      "hasLensDistortionLookupTable" : true,
+      "intrinsicMatrix" : [
+        2743.510009765625,
+        0,
+        2022.351318359375,
+        0,
+        2743.510009765625,
+        1510.5408935546875,
+        0,
+        0,
+        1
+      ],
+      "intrinsicMatrixReferenceDimensions" : {
+        "height" : 3024,
+        "width" : 4032
+      },
+      "lensDistortionCenter" : {
+        "x" : 2022.351318359375,
+        "y" : 1510.5408935546875
+      },
+      "pixelSizeMm" : 0.0010000000474974513,
+      "present" : true
+    },
+    "centerWindowMaxMeters" : 0.31860589981079102,
+    "centerWindowMedianMeters" : 0.2990652322769165,
+    "centerWindowMinMeters" : 0.27556502819061279,
+    "estimatedMmPerPixelAtRgb" : 0.10900825264437994,
+    "height" : 480,
+    "isFiltered" : true,
+    "originalPixelFormat" : "hdis",
+    "quality" : "high",
+    "validPixelRatio" : 1,
+    "width" : 640
+  },
+  "depthFileUri" : "file:\/\/\/var\/mobile\/Containers\/Data\/Application\/C79F9BC4-63A6-46A5-BC69-D2139C421ED5\/Documents\/SkinTraceSessions\/136EDFFB-615B-4BB0-B71D-91BEEFB306E0\/depth_float32.bin",
+  "deviceModel" : "iPhone13,2",
+  "effectiveCaptureMode" : "rgb_plus_truedepth",
+  "isSimulatedOrWebFallback" : false,
+  "liveGuidanceAtShutter" : {
+    "clippedHighlightRatio" : 0,
+    "clippedShadowRatio" : 0.0099408284023668643,
+    "depthAvailable" : true,
+    "depthValidRatio" : 0.96226635514018688,
+    "distanceState" : "in_range",
+    "faceCentered" : true,
+    "faceCount" : 1,
+    "faceCoverageRatio" : 0.19142857497138621,
+    "faceDistanceMeters" : 0.29826462268829346,
+    "guidanceMessages" : [
+      "Quality checks passed — tap Capture."
+    ],
+    "isSharp" : true,
+    "meanLuma" : 0.60423065320802116,
+    "mouthOpenRatio" : 0.057277090285595245,
+    "mouthWidthRatio" : 0.29756903648376465,
+    "neutralExpression" : true,
+    "pitchDegrees" : null,
+    "readyToCapture" : true,
+    "rollDegrees" : 0,
+    "sessionInterrupted" : false,
+    "sharpnessScore" : 43.368085207100592,
+    "thresholdsProvisional" : true,
+    "timestampIso" : "2026-11-27T05:23:26Z",
+    "variant" : "rgb_depth_guided",
+    "view" : "front",
+    "yawDegrees" : 0
+  },
+  "platform" : "ios",
+  "requestedVariant" : "rgb_depth_guided",
+  "rgbDimensions" : {
+    "height" : 3024,
+    "width" : 4032
+  },
+  "rgbFileUri" : "file:\/\/\/var\/mobile\/Containers\/Data\/Application\/C79F9BC4-63A6-46A5-BC69-D2139C421ED5\/Documents\/SkinTraceSessions\/136EDFFB-615B-4BB0-B71D-91BEEFB306E0\/original.heic",
+  "selectedDepthFormat" : {
+    "height" : 480,
+    "pixelFormat" : "fdep",
+    "width" : 640
+  },
+  "selectedVideoFormat" : {
+    "height" : 1440,
+    "pixelFormat" : "420f",
+    "width" : 1920
+  },
+  "sessionId" : "136EDFFB-615B-4BB0-B71D-91BEEFB306E0",
+  "storedImageMirrored" : false,
+  "systemVersion" : "26.5.2",
+  "timezone" : "Asia\/Ho_Chi_Minh",
+  "view" : "front",
+  "warnings" : [
+
+  ]
+}
