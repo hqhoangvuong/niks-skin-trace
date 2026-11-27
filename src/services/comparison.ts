@@ -83,8 +83,20 @@ export function evaluateComparability(
     alignment.scaleFactor > 0
   ) {
     // Fallback for RGB-only captures (Variant A/B): derive relative 2D facial scale delta
-    // from landmark alignment so colorimetry can enforce its <=12% scale consistency gate fairly.
+    // from landmark alignment so geometric (<=22%) and colorimetry (<=12%) gates apply symmetrically.
     scaleDeltaPct = (alignment.scaleFactor - 1) * 100;
+    if (distanceDeltaCm === undefined) {
+      const absScale = Math.abs(scaleDeltaPct);
+      if (absScale > 22.0) {
+        blockers.push(
+          `Large framing scale shift (${absScale.toFixed(1)}%; RGB-only geometric limit ≤ 22.0%).`
+        );
+      } else if (absScale > 12.0) {
+        cautions.push(
+          `Moderate framing scale shift (${absScale.toFixed(1)}%).`
+        );
+      }
+    }
   }
 
   // 4. Head pose delta (prefer still-photo alignment pose, fallback to shutter guidance)

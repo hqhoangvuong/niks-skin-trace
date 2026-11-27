@@ -572,7 +572,9 @@ function CaptureLab() {
           </button>
         </div>
 
-        {latestGuidance && (
+        {latestGuidance &&
+          variant !== 'rgb_unguided' &&
+          latestGuidance.variant !== 'rgb_unguided' && (
           <div className="kv-grid">
             <div className="kv-item">
               <div className="kv-label">Last Live Distance</div>

@@ -185,26 +185,34 @@ export function ValidationLab({
   );
 
   const pendingAnalysisCount = useMemo(() => {
+    const hasBlemishDrift = !evaluation.versionConsistency.blemishConsistent;
     return cohortSessions.filter((c) => {
-      const needsBlemish = c.blemishAnalysis?.state !== 'measured';
+      const needsBlemish =
+        c.blemishAnalysis?.state !== 'measured' || hasBlemishDrift;
       const needsColor =
         c.colorimetryAnalysis?.state !== 'measured' ||
         c.colorimetryAnalysis?.algorithmVersion !==
           COLORIMETRY_ALGORITHM_VERSION;
       return needsBlemish || needsColor;
     }).length;
-  }, [cohortSessions]);
+  }, [cohortSessions, evaluation.versionConsistency.blemishConsistent]);
 
-  async function handleBatchAnalyze() {
+  async function handleBatchAnalyze(forceRerunAll = false) {
     if (batchProgress !== null || cohortSessions.length === 0) return;
     setBatchErrors([]);
     setCopiedMode(null);
     const errors: string[] = [];
+    const seenReasons = new Set<string>();
+    const hasBlemishDrift = !evaluation.versionConsistency.blemishConsistent;
 
     for (let idx = 0; idx < cohortSessions.length; idx++) {
       const cap = cohortSessions[idx];
-      const needsBlemish = cap.blemishAnalysis?.state !== 'measured';
+      const needsBlemish =
+        forceRerunAll ||
+        hasBlemishDrift ||
+        cap.blemishAnalysis?.state !== 'measured';
       const needsColor =
+        forceRerunAll ||
         cap.colorimetryAnalysis?.state !== 'measured' ||
         cap.colorimetryAnalysis?.algorithmVersion !==
           COLORIMETRY_ALGORITHM_VERSION;
@@ -220,7 +228,16 @@ export function ValidationLab({
           const bRes = await cameraBridge.runCoreMLBlemishAnalysis({
             sessionId: cap.sessionId,
           });
-          onAnalysisSaved(cap.sessionId, bRes);
+          if (bRes.state === 'measured') {
+            onAnalysisSaved(cap.sessionId, bRes);
+          } else {
+            const reason =
+              bRes.unavailableReason ?? 'Core ML blemish model unavailable.';
+            if (!seenReasons.has(reason)) {
+              seenReasons.add(reason);
+              errors.push(`Blemish analysis unavailable: ${reason}`);
+            }
+          }
         } catch (err) {
           errors.push(
             `${cap.sessionId.slice(0, 8)} blemish failed: ${
@@ -233,7 +250,18 @@ export function ValidationLab({
       if (needsColor) {
         try {
           const cRes = await cameraBridge.runColorimetryAnalysis(cap.sessionId);
-          onColorimetrySaved(cap.sessionId, cRes);
+          if (cRes.state === 'measured') {
+            onColorimetrySaved(cap.sessionId, cRes);
+          } else {
+            const reason =
+              cRes.unavailableReason ?? 'CIELAB colorimetry unavailable.';
+            if (!seenReasons.has(reason)) {
+              seenReasons.add(reason);
+              errors.push(
+                `${cap.sessionId.slice(0, 8)} colorimetry unavailable: ${reason}`
+              );
+            }
+          }
         } catch (err) {
           errors.push(
             `${cap.sessionId.slice(0, 8)} colorimetry failed: ${
@@ -362,7 +390,7 @@ export function ValidationLab({
           <button
             type="button"
             className="primary"
-            onClick={handleBatchAnalyze}
+            onClick={() => handleBatchAnalyze(false)}
             disabled={
               batchProgress !== null ||
               cohortSessions.length === 0 ||
@@ -372,7 +400,14 @@ export function ValidationLab({
             {batchProgress ??
               (pendingAnalysisCount > 0
                 ? `Batch Analyze Cohort (${pendingAnalysisCount} pending)`
-                : `All ${cohortSessions.length} Cohort Shots Analyzed (v2)`)}
+                : `All ${cohortSessions.length} Cohort Shots Analyzed (${COLORIMETRY_ALGORITHM_VERSION})`)}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleBatchAnalyze(true)}
+            disabled={batchProgress !== null || cohortSessions.length === 0}
+          >
+            Re-run All Cohort Analyses
           </button>
           <button
             type="button"
@@ -731,6 +766,14 @@ export function ValidationLab({
           composite skin score is calculated.
         </p>
 
+        {trend.notes.length > 0 && (
+          <ul className="note-list" style={{ marginBottom: 10 }}>
+            {trend.notes.map((n, idx) => (
+              <li key={idx}>{n}</li>
+            ))}
+          </ul>
+        )}
+
         {trend.points.length === 0 ? (
           <p className="subtitle">No sessions available for this device/view.</p>
         ) : (
@@ -746,36 +789,59 @@ export function ValidationLab({
                   <th>Mean a*</th>
                   <th>Redness %</th>
                   <th>Dark Spot %</th>
+                  <th>Comparability Note</th>
                 </tr>
               </thead>
               <tbody>
-                {trend.points.map((pt) => (
-                  <tr key={pt.dayKey}>
-                    <td>{pt.dayKey}</td>
-                    <td>{pt.variant}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          pt.comparabilityVsBaseline === 'comparable' ||
-                          pt.comparabilityVsBaseline === 'baseline'
-                            ? 'ok'
-                            : 'danger'
-                        }`}
-                      >
-                        {pt.comparabilityVsBaseline}
-                      </span>
-                    </td>
-                    <td>
-                      {pt.totalActiveBlemishes !== null
-                        ? pt.totalActiveBlemishes
-                        : pt.blemishState}
-                    </td>
-                    <td>{fmtNum(pt.totalAreaMm2, '', 1)}</td>
-                    <td>{fmtNum(pt.meanFaceAStar, '', 2)}</td>
-                    <td>{fmtNum(pt.meanRednessAreaPct, '%', 1)}</td>
-                    <td>{fmtNum(pt.meanDarkSpotAreaPct, '%', 1)}</td>
-                  </tr>
-                ))}
+                {trend.points.map((pt) => {
+                  const isRefused =
+                    pt.comparabilityVsBaseline === 'not_comparable';
+                  return (
+                    <tr
+                      key={pt.dayKey}
+                      style={isRefused ? { opacity: 0.65 } : undefined}
+                    >
+                      <td>{pt.dayKey}</td>
+                      <td>{pt.variant}</td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            pt.comparabilityVsBaseline === 'comparable' ||
+                            pt.comparabilityVsBaseline === 'baseline'
+                              ? 'ok'
+                              : 'danger'
+                          }`}
+                        >
+                          {pt.comparabilityVsBaseline}
+                        </span>
+                      </td>
+                      <td>
+                        {isRefused
+                          ? 'withheld'
+                          : pt.totalActiveBlemishes !== null
+                            ? pt.totalActiveBlemishes
+                            : pt.blemishState}
+                      </td>
+                      <td>
+                        {isRefused ? '—' : fmtNum(pt.totalAreaMm2, '', 1)}
+                      </td>
+                      <td>
+                        {isRefused ? '—' : fmtNum(pt.meanFaceAStar, '', 2)}
+                      </td>
+                      <td>
+                        {isRefused
+                          ? '—'
+                          : fmtNum(pt.meanRednessAreaPct, '%', 1)}
+                      </td>
+                      <td>
+                        {isRefused
+                          ? '—'
+                          : fmtNum(pt.meanDarkSpotAreaPct, '%', 1)}
+                      </td>
+                      <td>{pt.comparabilityReasons[0] ?? '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

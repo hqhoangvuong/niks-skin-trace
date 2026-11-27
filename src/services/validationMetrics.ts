@@ -241,6 +241,12 @@ function classifyRefusalReason(reason: string): RefusalReasonBucket {
   if (lower.includes('view mismatch')) return 'view_mismatch';
   if (lower.includes('capture mode mismatch')) return 'mode_mismatch';
   if (lower.includes('different devices')) return 'device_mismatch';
+  if (lower.includes('image scale shifted') || lower.includes('framing scale shift')) {
+    return 'distance_shift';
+  }
+  if (lower.includes('missing') || lower.includes('unavailable')) {
+    return 'missing_metadata';
+  }
   if (lower.includes('distance')) return 'distance_shift';
   if (lower.includes('yaw')) return 'yaw_shift';
   if (lower.includes('ev') || lower.includes('exposure') || lower.includes('lighting')) {
@@ -248,9 +254,6 @@ function classifyRefusalReason(reason: string): RefusalReasonBucket {
   }
   if (lower.includes('white-balance') || lower.includes('white balance')) {
     return 'white_balance_shift';
-  }
-  if (lower.includes('missing') || lower.includes('unavailable')) {
-    return 'missing_metadata';
   }
   if (lower.includes('version') || lower.includes('mismatch')) {
     return 'version_mismatch';
@@ -315,6 +318,23 @@ export function computeVariantRepeatability(
   let analyzedBlemishCount = 0;
   let analyzedColorimetryCount = 0;
 
+  // Identify dominant blemish version signature so per-session area CV% never mixes model versions.
+  const blemishVersionCounts = new Map<string, number>();
+  for (const s of filtered) {
+    const sig = blemishVersionSignature(s);
+    if (sig) {
+      blemishVersionCounts.set(sig, (blemishVersionCounts.get(sig) ?? 0) + 1);
+    }
+  }
+  let dominantBlemishSig: string | null = null;
+  let dominantBlemishMax = 0;
+  for (const [sig, count] of blemishVersionCounts.entries()) {
+    if (count > dominantBlemishMax) {
+      dominantBlemishMax = count;
+      dominantBlemishSig = sig;
+    }
+  }
+
   for (const s of filtered) {
     if (isFiniteNum(s.captureDurationMs)) {
       captureDurations.push(s.captureDurationMs);
@@ -356,30 +376,32 @@ export function computeVariantRepeatability(
       if (isFiniteNum(s.blemishAnalysis.computationTimeMs)) {
         blemishComputeMs.push(s.blemishAnalysis.computationTimeMs);
       }
-      const stdRegions = (s.blemishAnalysis.regions ?? []).filter((r) =>
-        STANDARD_FACIAL_REGIONS.includes(r.region)
-      );
-      const totalActive = stdRegions.reduce(
-        (sum, r) => sum + (isFiniteNum(r.activeBlemishCount) ? r.activeBlemishCount : 0),
-        0
-      );
-      const totalNormArea = stdRegions.reduce(
-        (sum, r) =>
-          sum + (isFiniteNum(r.affectedAreaNormalized) ? r.affectedAreaNormalized : 0),
-        0
-      );
-      activeCounts.push(totalActive);
-      normalizedAreas.push(totalNormArea);
-
-      if (
-        stdRegions.length > 0 &&
-        stdRegions.every((r) => isFiniteNum(r.affectedAreaMm2))
-      ) {
-        const totalMm2 = stdRegions.reduce(
-          (sum, r) => sum + (r.affectedAreaMm2 as number),
-          0
+      const sig = blemishVersionSignature(s);
+      if (!dominantBlemishSig || sig === dominantBlemishSig) {
+        const stdRegions = (s.blemishAnalysis.regions ?? []).filter((r) =>
+          STANDARD_FACIAL_REGIONS.includes(r.region)
         );
-        calibratedAreasMm2.push(totalMm2);
+        if (stdRegions.length > 0) {
+          const totalActive = stdRegions.reduce(
+            (sum, r) => sum + (isFiniteNum(r.activeBlemishCount) ? r.activeBlemishCount : 0),
+            0
+          );
+          const totalNormArea = stdRegions.reduce(
+            (sum, r) =>
+              sum + (isFiniteNum(r.affectedAreaNormalized) ? r.affectedAreaNormalized : 0),
+            0
+          );
+          activeCounts.push(totalActive);
+          normalizedAreas.push(totalNormArea);
+
+          if (stdRegions.every((r) => isFiniteNum(r.affectedAreaMm2))) {
+            const totalMm2 = stdRegions.reduce(
+              (sum, r) => sum + (r.affectedAreaMm2 as number),
+              0
+            );
+            calibratedAreasMm2.push(totalMm2);
+          }
+        }
       }
     }
 
@@ -394,6 +416,7 @@ export function computeVariantRepeatability(
   // Pairwise analysis across all unordered pairs (i < j)
   let totalPairs = 0;
   let geometricComparablePairs = 0;
+  let analyzedColorPairs = 0;
   let colorComparablePairs = 0;
   let blemishComparablePairs = 0;
   let blemishFalseChangePairs = 0;
@@ -441,6 +464,13 @@ export function computeVariantRepeatability(
         if (anyDelta) {
           blemishFalseChangePairs += 1;
         }
+      }
+
+      const bothColorAnalyzed =
+        base.colorimetryAnalysis !== undefined &&
+        curr.colorimetryAnalysis !== undefined;
+      if (bothColorAnalyzed) {
+        analyzedColorPairs += 1;
       }
 
       const colorComp = compareColorimetryAnalyses(base, curr, comp);
@@ -536,9 +566,7 @@ export function computeVariantRepeatability(
       totalPairs > 0 ? geometricComparablePairs / totalPairs : null,
     colorComparablePairs,
     colorComparableRate:
-      totalPairs > 0 && analyzedColorimetryCount >= 2
-        ? colorComparablePairs / totalPairs
-        : null,
+      analyzedColorPairs > 0 ? colorComparablePairs / analyzedColorPairs : null,
     blemishComparablePairs,
     refusalReasonCounts,
     activeBlemishCountSd: sampleSd(activeCounts),
@@ -749,6 +777,9 @@ export function evaluateValidationCohort(
 
   const cohortValid =
     sessions.length > 0 && deviceModels.length === 1 && views.length === 1;
+  const hasSimulatedOrFallback = sessions.some(
+    (s) => s.isSimulatedOrWebFallback
+  );
 
   const variantA = computeVariantRepeatability(
     sessions,
@@ -766,98 +797,135 @@ export function evaluateValidationCohort(
     thresholds.minSamplesPerVariant
   );
 
-  const gatesB = evaluateVariantGates(variantB, thresholds);
-  const gatesC = evaluateVariantGates(variantC, thresholds);
-  const gates = [...gatesB, ...gatesC];
+  const variantCMissingDepth =
+    variantC.sampleCount > 0 &&
+    variantC.depthAvailableCount < variantC.sampleCount;
+  if (variantCMissingDepth) {
+    warnings.push(
+      `Variant C has ${variantC.sampleCount - variantC.depthAvailableCount} capture(s) without TrueDepth depth data — RGB-only fallbacks are not counted as depth-assisted captures.`
+    );
+  }
 
-  const interEyeCvRelativeReduction =
-    variantB.interEyeDistanceCvPct !== null &&
-    variantC.interEyeDistanceCvPct !== null &&
-    variantB.interEyeDistanceCvPct > 1e-6
-      ? (variantB.interEyeDistanceCvPct - variantC.interEyeDistanceCvPct) /
-        variantB.interEyeDistanceCvPct
-      : null;
+  const cohortBlocked =
+    !cohortValid ||
+    !versionConsistency.blemishConsistent ||
+    !versionConsistency.colorimetryConsistent;
 
-  const yawSdRelativeReduction =
-    variantB.yawSdDeg !== null &&
-    variantC.yawSdDeg !== null &&
-    variantB.yawSdDeg > 1e-6
-      ? (variantB.yawSdDeg - variantC.yawSdDeg) / variantB.yawSdDeg
-      : null;
+  const rawGatesB = evaluateVariantGates(variantB, thresholds);
+  const rawGatesC = evaluateVariantGates(variantC, thresholds);
+  const gates = cohortBlocked
+    ? [...rawGatesB, ...rawGatesC].map((g) => ({
+        ...g,
+        passed: null,
+        note: 'Withheld due to cohort device/view/version blocker.',
+      }))
+    : [...rawGatesB, ...rawGatesC];
 
-  const colorComparableRateGain =
-    variantB.colorComparableRate !== null &&
-    variantC.colorComparableRate !== null
-      ? variantC.colorComparableRate - variantB.colorComparableRate
-      : null;
-
-  const withinVariantCMm2VsNormCvReduction =
-    variantC.normalizedAreaCvPct !== null &&
-    variantC.calibratedAreaMm2CvPct !== null &&
-    variantC.normalizedAreaCvPct > 1e-6
-      ? (variantC.normalizedAreaCvPct - variantC.calibratedAreaMm2CvPct) /
-        variantC.normalizedAreaCvPct
-      : null;
-
+  let interEyeCvRelativeReduction: number | null = null;
+  let yawSdRelativeReduction: number | null = null;
+  let colorComparableRateGain: number | null = null;
+  let withinVariantCMm2VsNormCvReduction: number | null = null;
   const benefitReasons: string[] = [];
-  if (
-    interEyeCvRelativeReduction !== null &&
-    interEyeCvRelativeReduction >= thresholds.minDepthBenefitRelativeReduction
-  ) {
-    benefitReasons.push(
-      `Reduced framing scale CV% by ${(interEyeCvRelativeReduction * 100).toFixed(1)}% vs guided RGB alone.`
-    );
-  }
-  if (
-    yawSdRelativeReduction !== null &&
-    yawSdRelativeReduction >= thresholds.minDepthBenefitRelativeReduction
-  ) {
-    benefitReasons.push(
-      `Reduced head yaw SD by ${(yawSdRelativeReduction * 100).toFixed(1)}% vs guided RGB alone.`
-    );
-  }
-  if (colorComparableRateGain !== null && colorComparableRateGain >= 0.1) {
-    benefitReasons.push(
-      `Increased color-comparable pair rate by +${(colorComparableRateGain * 100).toFixed(1)} percentage points vs guided RGB.`
-    );
-  }
-  if (
-    withinVariantCMm2VsNormCvReduction !== null &&
-    withinVariantCMm2VsNormCvReduction >=
-      thresholds.minDepthBenefitRelativeReduction
-  ) {
-    benefitReasons.push(
-      `TrueDepth mm/px scaling reduced physical lesion area CV% by ${(withinVariantCMm2VsNormCvReduction * 100).toFixed(1)}% vs raw normalized area.`
-    );
+
+  const variantCHasTrueDepth =
+    !hasSimulatedOrFallback &&
+    variantC.depthAvailableCount >= thresholds.minSamplesPerVariant;
+
+  if (!cohortBlocked && variantCHasTrueDepth) {
+    interEyeCvRelativeReduction =
+      variantB.interEyeDistanceCvPct !== null &&
+      variantC.interEyeDistanceCvPct !== null &&
+      variantB.interEyeDistanceCvPct > 1e-6
+        ? (variantB.interEyeDistanceCvPct - variantC.interEyeDistanceCvPct) /
+          variantB.interEyeDistanceCvPct
+        : null;
+
+    yawSdRelativeReduction =
+      variantB.yawSdDeg !== null &&
+      variantC.yawSdDeg !== null &&
+      variantB.yawSdDeg > 1e-6
+        ? (variantB.yawSdDeg - variantC.yawSdDeg) / variantB.yawSdDeg
+        : null;
+
+    colorComparableRateGain =
+      variantB.colorComparableRate !== null &&
+      variantC.colorComparableRate !== null
+        ? variantC.colorComparableRate - variantB.colorComparableRate
+        : null;
+
+    withinVariantCMm2VsNormCvReduction =
+      variantC.normalizedAreaCvPct !== null &&
+      variantC.calibratedAreaMm2CvPct !== null &&
+      variantC.normalizedAreaCvPct > 1e-6
+        ? (variantC.normalizedAreaCvPct - variantC.calibratedAreaMm2CvPct) /
+          variantC.normalizedAreaCvPct
+        : null;
+
+    if (
+      interEyeCvRelativeReduction !== null &&
+      interEyeCvRelativeReduction >= thresholds.minDepthBenefitRelativeReduction
+    ) {
+      benefitReasons.push(
+        `Reduced framing scale CV% by ${(interEyeCvRelativeReduction * 100).toFixed(1)}% vs guided RGB alone.`
+      );
+    }
+    if (
+      yawSdRelativeReduction !== null &&
+      yawSdRelativeReduction >= thresholds.minDepthBenefitRelativeReduction
+    ) {
+      benefitReasons.push(
+        `Reduced head yaw SD by ${(yawSdRelativeReduction * 100).toFixed(1)}% vs guided RGB alone.`
+      );
+    }
+    if (colorComparableRateGain !== null && colorComparableRateGain >= 0.1) {
+      benefitReasons.push(
+        `Increased color-comparable pair rate by +${(colorComparableRateGain * 100).toFixed(1)} percentage points vs guided RGB.`
+      );
+    }
+    if (
+      withinVariantCMm2VsNormCvReduction !== null &&
+      withinVariantCMm2VsNormCvReduction >=
+        thresholds.minDepthBenefitRelativeReduction
+    ) {
+      benefitReasons.push(
+        `TrueDepth mm/px scaling reduced physical lesion area CV% by ${(withinVariantCMm2VsNormCvReduction * 100).toFixed(1)}% vs raw normalized area.`
+      );
+    }
   }
 
   let verdict: TrueDepthDecisionVerdict;
   let verdictRationale: string;
 
-  const bHasColor = variantB.analyzedColorimetryCount >= 2;
-  const cHasColor = variantC.analyzedColorimetryCount >= 2;
+  const bAllColorAnalyzed =
+    variantB.sampleCount > 0 &&
+    variantB.analyzedColorimetryCount === variantB.sampleCount;
+  const cAllColorAnalyzed =
+    variantC.sampleCount > 0 &&
+    variantC.analyzedColorimetryCount === variantC.sampleCount;
 
-  if (
-    !cohortValid ||
-    !versionConsistency.blemishConsistent ||
-    !versionConsistency.colorimetryConsistent
-  ) {
+  if (cohortBlocked) {
     verdict = 'insufficient_data';
     verdictRationale =
       blockers[0] ?? 'Cohort has unresolved device, view, or version blockers.';
+  } else if (hasSimulatedOrFallback) {
+    verdict = 'insufficient_data';
+    verdictRationale =
+      'Cohort contains web-fallback or simulator captures — TrueDepth repeatability verdicts require physical iPhone captures.';
   } else if (
     !variantB.sufficientForVerdict ||
     !variantC.sufficientForVerdict
   ) {
     verdict = 'insufficient_data';
     verdictRationale = `Need at least ${thresholds.minSamplesPerVariant} captures in both Variant B (currently ${variantB.sampleCount}) and Variant C (currently ${variantC.sampleCount}) to evaluate TrueDepth benefit.`;
-  } else if (!bHasColor || !cHasColor) {
+  } else if (!variantCHasTrueDepth) {
     verdict = 'insufficient_data';
-    verdictRationale =
-      'Run CIELAB colorimetry analysis on cohort sessions in both Variant B and Variant C before evaluating false-change thresholds.';
+    verdictRationale = `Variant C requires at least ${thresholds.minSamplesPerVariant} physical captures with TrueDepth depth data (currently ${variantC.depthAvailableCount}/${variantC.sampleCount}) before evaluating TrueDepth benefit.`;
+  } else if (!bAllColorAnalyzed || !cAllColorAnalyzed) {
+    verdict = 'insufficient_data';
+    verdictRationale = `Analyze all Variant B (${variantB.analyzedColorimetryCount}/${variantB.sampleCount}) and Variant C (${variantC.analyzedColorimetryCount}/${variantC.sampleCount}) sessions with CIELAB colorimetry before scoring false-change thresholds.`;
   } else {
-    const bAllPassed = gatesB.every((g) => g.passed === true);
-    const cAllPassed = gatesC.every((g) => g.passed === true);
+    const bAllPassed = rawGatesB.every((g) => g.passed === true);
+    const cAllPassed = rawGatesC.every((g) => g.passed === true);
 
     if (cAllPassed && benefitReasons.length > 0) {
       verdict = 'truedepth_demonstrated_benefit';
@@ -944,9 +1012,10 @@ export function buildLongitudinalTrendSummary(
   const dayEntries = Array.from(byDay.entries())
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([dayKey, list]) => {
-      // Prefer a shot with both analyses & accepted quality; otherwise latest shot of the day.
+      // Prefer TrueDepth guided captures (+8), then analyzed & accepted quality shots; tie-break by latest.
       const ranked = [...list].sort((a, b) => {
         const score = (s: NativeCaptureRecord) =>
+          (s.requestedVariant === 'rgb_depth_guided' && s.depth?.available ? 8 : 0) +
           (s.colorimetryAnalysis?.state === 'measured' ? 4 : 0) +
           (s.blemishAnalysis?.state === 'measured' ? 2 : 0) +
           (s.liveGuidanceAtShutter?.readyToCapture === true ? 1 : 0);
@@ -967,13 +1036,27 @@ export function buildLongitudinalTrendSummary(
 
     if (idx > 0) {
       const comp = evaluateComparability(baseline, session);
-      if (comp.comparabilityState === 'comparable') {
+      const colorComp = compareColorimetryAnalyses(baseline, session, comp);
+      const blemishComp = compareBlemishAnalyses(baseline, session, comp);
+
+      const combinedBlockers: string[] = [];
+      if (comp.comparabilityState !== 'comparable') {
+        combinedBlockers.push(...comp.reasons);
+      }
+      if (colorComp.state === 'not_comparable') {
+        combinedBlockers.push(...colorComp.reasons);
+      }
+      if (blemishComp.state === 'not_comparable') {
+        combinedBlockers.push(...blemishComp.reasons);
+      }
+
+      if (combinedBlockers.length === 0) {
         comparabilityVsBaseline = 'comparable';
         comparabilityReasons = comp.reasons;
         comparableDays += 1;
       } else {
         comparabilityVsBaseline = 'not_comparable';
-        comparabilityReasons = comp.reasons;
+        comparabilityReasons = Array.from(new Set(combinedBlockers));
         notComparableDays += 1;
       }
     }

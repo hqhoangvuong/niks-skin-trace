@@ -517,7 +517,9 @@ final class TrueDepthLiveCameraViewController: UIViewController {
         )
         let dict = evaluated.toDictionary(config: config)
         latestGuidanceDict = dict
-        onGuidanceUpdate(dict)
+        if config.variant != "rgb_unguided" {
+            onGuidanceUpdate(dict)
+        }
 
         DispatchQueue.main.async { [weak self] in
             guard let self, !self.isCapturing else { return }

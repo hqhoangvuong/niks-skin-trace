@@ -593,4 +593,156 @@ describe('validationMetrics (M4)', () => {
     assert.ok(md.includes('iPhone 16 Pro'));
     assert.ok(md.toLowerCase().includes('pending'));
   });
+
+  it('blocks truedepth_demonstrated_benefit when Variant C has no TrueDepth depth or web fallback, and withholds benefitReasons on blocked cohorts', () => {
+    const bInterEye = [0.262, 0.275, 0.28, 0.287, 0.296];
+    const cInterEye = [0.277, 0.279, 0.28, 0.281, 0.283];
+    const bShots = bInterEye.map((eye, i) =>
+      makeCapture(`b-${i}`, 'rgb_guided', {
+        capturedAtIso: `2026-11-27T10:0${i}:00.000Z`,
+        interEyeDistance: eye,
+      })
+    );
+    // Variant C requested depth, but depth fell back to unavailable (depthMeters: null).
+    const cNoDepthShots = cInterEye.map((eye, i) =>
+      makeCapture(`c-nodepth-${i}`, 'rgb_depth_guided', {
+        capturedAtIso: `2026-11-27T10:1${i}:00.000Z`,
+        interEyeDistance: eye,
+        depthMeters: null,
+      })
+    );
+    const evalNoDepth = evaluateValidationCohort([...bShots, ...cNoDepthShots]);
+    assert.equal(evalNoDepth.verdict, 'insufficient_data');
+    assert.equal(evalNoDepth.depthVsGuidedComparison.benefitReasons.length, 0);
+
+    // Version-drifted cohort must withhold benefitReasons and gate verdicts.
+    const cDrifted = cInterEye.map((eye, i) =>
+      makeCapture(`c-drift-${i}`, 'rgb_depth_guided', {
+        capturedAtIso: `2026-11-27T10:2${i}:00.000Z`,
+        interEyeDistance: eye,
+        colorimetryOverrides: { algorithmVersion: 'cielab-roi-srgb-v1' },
+      })
+    );
+    const evalDrifted = evaluateValidationCohort([...bShots, ...cDrifted]);
+    assert.equal(evalDrifted.verdict, 'insufficient_data');
+    assert.equal(evalDrifted.depthVsGuidedComparison.benefitReasons.length, 0);
+    assert.ok(evalDrifted.gates.every((g) => g.passed === null));
+  });
+
+  it('flags longitudinal days not_comparable on M3 colorimetry EV/version shifts and prefers TrueDepth shots on mixed-variant days', () => {
+    const day1B = makeCapture('d1-b', 'rgb_guided', {
+      capturedAtIso: '2026-11-24T09:05:00.000Z',
+    });
+    const day1C = makeCapture('d1-c', 'rgb_depth_guided', {
+      capturedAtIso: '2026-11-24T09:00:00.000Z',
+    });
+    // Day 2 has 1.0 EV shift (passes M1 <=1.5 EV, fails M3 <=0.75 EV).
+    const day2ModerateEv = makeCapture('d2-ev', 'rgb_depth_guided', {
+      capturedAtIso: '2026-11-25T09:00:00.000Z',
+      iso: 320,
+    });
+    // Day 3 has algorithm version drift (v1 vs v2).
+    const day3VersionDrift = makeCapture('d3-v1', 'rgb_depth_guided', {
+      capturedAtIso: '2026-11-26T09:00:00.000Z',
+      colorimetryOverrides: { algorithmVersion: 'cielab-roi-srgb-v1' },
+    });
+
+    const trend = buildLongitudinalTrendSummary(
+      [day1B, day1C, day2ModerateEv, day3VersionDrift],
+      { view: 'front', deviceModel: 'iPhone13,2' }
+    );
+    // Day 1 must pick Variant C (TrueDepth) over Variant B even though B is 5 min later.
+    assert.equal(trend.points[0].sessionId, 'd1-c');
+    assert.equal(trend.points[1].comparabilityVsBaseline, 'not_comparable');
+    assert.equal(trend.points[2].comparabilityVsBaseline, 'not_comparable');
+  });
+
+  it('buckets missing EV/WB/distance metadata into missing_metadata rather than physical shift buckets', () => {
+    const cShots = [0, 1, 2].map((i) => {
+      const cap = makeCapture(`c-nometa-${i}`, 'rgb_depth_guided', {
+        capturedAtIso: `2026-11-27T10:0${i}:00.000Z`,
+      });
+      cap.cameraMetadata = undefined;
+      return cap;
+    });
+    const summary = computeVariantRepeatability(cShots, 'rgb_depth_guided');
+    assert.ok((summary.refusalReasonCounts.missing_metadata ?? 0) > 0);
+    assert.equal(summary.refusalReasonCounts.exposure_ev_shift ?? 0, 0);
+    assert.equal(summary.refusalReasonCounts.white_balance_shift ?? 0, 0);
+  });
+
+  it('returns insufficient_data rather than thresholds_not_met when cohort is only partially color-analyzed', () => {
+    const bShots = [0, 1, 2, 3, 4].map((i) =>
+      makeCapture(`b-part-${i}`, 'rgb_guided', {
+        capturedAtIso: `2026-11-27T10:0${i}:00.000Z`,
+        includeColorimetry: i < 2, // only 2 of 5 analyzed
+      })
+    );
+    const cShots = [0, 1, 2, 3, 4].map((i) =>
+      makeCapture(`c-part-${i}`, 'rgb_depth_guided', {
+        capturedAtIso: `2026-11-27T10:1${i}:00.000Z`,
+      })
+    );
+    const evaluation = evaluateValidationCohort([...bShots, ...cShots]);
+    assert.equal(evaluation.verdict, 'insufficient_data');
+    assert.equal(evaluation.variants.rgb_guided.colorComparableRate, 1);
+  });
+
+  it('enforces symmetric RGB-only framing scale gates (<=12% color, <=22% geometric) and refuses unaligned colorimetry', () => {
+    const base = makeCapture('b-base', 'rgb_guided', {
+      capturedAtIso: '2026-11-27T10:00:00.000Z',
+      interEyeDistance: 0.28,
+    });
+    // 15% scale shift (0.28 / 0.2435 = 1.15): passes M1 <=22%, fails M3 color <=12%.
+    const midShift = makeCapture('b-mid', 'rgb_guided', {
+      capturedAtIso: '2026-11-27T10:01:00.000Z',
+      interEyeDistance: 0.2435,
+    });
+    // 30% scale shift (0.28 / 0.215 = 1.30): fails M1 geometric >22%.
+    const hugeShift = makeCapture('b-huge', 'rgb_guided', {
+      capturedAtIso: '2026-11-27T10:02:00.000Z',
+      interEyeDistance: 0.215,
+    });
+    const unaligned = makeCapture('b-unaligned', 'rgb_guided', {
+      capturedAtIso: '2026-11-27T10:03:00.000Z',
+    });
+    unaligned.facialAlignment = { detected: false, faceCount: 0 };
+
+    const sMid = computeVariantRepeatability([base, midShift], 'rgb_guided');
+    assert.equal(sMid.geometricComparablePairs, 1);
+    assert.equal(sMid.colorComparablePairs, 0);
+
+    const sHuge = computeVariantRepeatability([base, hugeShift], 'rgb_guided');
+    assert.equal(sHuge.geometricComparablePairs, 0);
+
+    const sUnaligned = computeVariantRepeatability([base, unaligned], 'rgb_guided');
+    assert.equal(sUnaligned.colorComparablePairs, 0);
+    assert.ok((sUnaligned.refusalReasonCounts.missing_metadata ?? 0) > 0);
+  });
+
+  it('filters per-session blemish CV% to the dominant version when version drift exists', () => {
+    const shots = [
+      makeCapture('v1-0', 'rgb_depth_guided', {
+        capturedAtIso: '2026-11-27T10:00:00.000Z',
+        blemishOverrides: { modelVersion: 'model-v2', normalizedArea: 0.0025, areaMm2: 38 },
+      }),
+      makeCapture('v1-1', 'rgb_depth_guided', {
+        capturedAtIso: '2026-11-27T10:01:00.000Z',
+        blemishOverrides: { modelVersion: 'model-v2', normalizedArea: 0.0025, areaMm2: 38 },
+      }),
+      makeCapture('v1-2', 'rgb_depth_guided', {
+        capturedAtIso: '2026-11-27T10:02:00.000Z',
+        blemishOverrides: { modelVersion: 'model-v2', normalizedArea: 0.0025, areaMm2: 38 },
+      }),
+      // Single outlier from an older model version with 10x larger area
+      makeCapture('v0-outlier', 'rgb_depth_guided', {
+        capturedAtIso: '2026-11-27T10:03:00.000Z',
+        blemishOverrides: { modelVersion: 'model-v1', normalizedArea: 0.025, areaMm2: 380 },
+      }),
+    ];
+    const summary = computeVariantRepeatability(shots, 'rgb_depth_guided');
+    // Dominant version ('model-v2', 3 shots) has identical areas -> 0% CV, not inflated by v1 outlier.
+    assert.equal(summary.normalizedAreaCvPct, 0);
+    assert.equal(summary.calibratedAreaMm2CvPct, 0);
+  });
 });
