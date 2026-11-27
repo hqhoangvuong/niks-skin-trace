@@ -77,6 +77,14 @@ export function evaluateComparability(
   const currScale = current.depth?.estimatedMmPerPixelAtRgb;
   if (isFiniteNum(baseScale) && isFiniteNum(currScale) && baseScale > 0) {
     scaleDeltaPct = ((currScale - baseScale) / baseScale) * 100;
+  } else if (
+    alignment.mode !== 'unaligned' &&
+    isFiniteNum(alignment.scaleFactor) &&
+    alignment.scaleFactor > 0
+  ) {
+    // Fallback for RGB-only captures (Variant A/B): derive relative 2D facial scale delta
+    // from landmark alignment so colorimetry can enforce its <=12% scale consistency gate fairly.
+    scaleDeltaPct = (alignment.scaleFactor - 1) * 100;
   }
 
   // 4. Head pose delta (prefer still-photo alignment pose, fallback to shutter guidance)
